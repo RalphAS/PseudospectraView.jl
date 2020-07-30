@@ -50,6 +50,9 @@ An app window should appear, and a spectral portrait (i.e. a contour
 plot of base-10 logarithms of inverse resolvent norms) should be shown
 in the main display.
 
+The GUI is not yet "self-sufficient"; some important diagnostic messages
+and a few prompts for user input are still sent to the REPL.
+
 The default mesh is very coarse; adjust the grid size and axis limits to
 taste and press the "Update" button to recompute.
 

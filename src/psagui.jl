@@ -1,35 +1,45 @@
 module PSApp
 
-
 # WARNING: some comments are obsolete!
 # This is an incomplete refactor of a 3-year old code, a Julian dinosaur.
 
+ENV["QSG_RENDER_LOOP"] = "basic"
+
 using QML
+using Observables
+
+const verbosity = Ref(2)
+
 # Python must not manage a gui:
 ENV["MPLBACKEND"] = "Agg"
 using Plots
+# It's too easy to get a less functional backend, so let's discourage that.
+pyplot()
+(verbosity[] > 1) && println("Plots loaded.")
+
 using Pseudospectra
-PseudospectraPlots = Pseudospectra.PseudospectraPlots
-PlotsGUIState = Pseudospectra.PseudospectraPlots.PlotsGUIState
-using PseudospectraQML
-
-using Formatting
-PSAData = PseudospectraQML.PSAData
-
-verbosity=2
-
 # shorthand
 PSA = Pseudospectra
+
+PseudospectraPlots = Pseudospectra.PseudospectraPlots
+PlotsGUIState = Pseudospectra.PseudospectraPlots.PlotsGUIState
+
+using PseudospectraQML
+
+PSAData = PseudospectraQML.PSAData
+
+using Formatting
 
 using Printf: @sprintf
 using SparseArrays: issparse
 # for schur!
 using LinearAlgebra
 
+
 ################################################################
 # Global data
-# Since the App runs in global scope, we may as well use global vars
-# where it's convenient.
+# Since the App runs in global scope, and dependencies make this godawful
+# slow anyway, we may as well use global vars where it's convenient.
 # A few more are created by big function calls below.
 
 maindisplay = nothing
@@ -48,6 +58,7 @@ firstcall = true
 @enum DirVsIter dvi_unset dvi_direct dvi_iter
 dvi = dvi_unset
 
+const timer = QTimer()
 
 # flags indicating whether items changed by GUI require action
 need_recomp = false
@@ -58,8 +69,6 @@ need_redraw = false
 compute_chnl = nothing
 running = false
 
-initmsg() = "Welcome to PseudospectraView"
-
 const axname2idx = Dict(:xMin=>1,:xMax=>2,:yMin=>3,:yMax=>4)
 
 tmpdata = nothing
@@ -67,6 +76,151 @@ tmpdata = nothing
 # Until we can get a plot location from the pointer and GUI canvas,
 # we use a dialog which saves its result here:
 zselected = NaN+0.0im
+
+################################################################
+# Global state
+# Observables for data exchange between GUI and Julia
+
+const o_banner_msg = Observable("Welcome to PseudospectraQML")
+const o_info_msg = Observable("")
+const computation = Observable{Any}(nothing)
+const computation_key = Observable(Cint(0))
+const o_progress = Observable(0.0)
+const o_gridpts = Observable("")
+const o_xmin = Observable("")
+const o_xmax = Observable("")
+const o_ymin = Observable("")
+const o_ymax = Observable("")
+const o_ticks = Observable(Cint(0)) # Number of times the timer has ticked
+
+propmap = JuliaPropertyMap(
+    "computationkey" => computation_key,
+    "gridpts" => o_gridpts,
+    "xmin" => o_xmin,
+    "xmax" => o_xmax,
+    "ymin" => o_ymin,
+    "ymax" => o_ymax,
+    "ticks" => o_ticks,
+    "banner_msg" => o_banner_msg,
+    "info_msg" => o_info_msg,
+)
+
+mutable struct Computation
+    status::Int # 0:initialized 1:running 2:interrupted 3:done 4:error
+    key::Int32
+    function Computation()
+        me = new(0,computation_key[])
+        on(computation_key) do key
+            me.key = key
+            me.status = 0
+        end
+        return me
+    end
+end
+isfinished(c::Computation) = c.status >= 3
+struct ChannelComputation
+    channel::Channel
+end
+function compute_chan(channel::Channel)
+    verbosity[] > 1 && println("starting computation")
+    c = Computation()
+    while !isfinished(c)
+        run!(c)
+        put!(channel, c.status)
+    end
+end
+
+const pvals = [0.0, 0.5, 0.99, 1.0, -1.0]
+function step(c::ChannelComputation)
+    s = take!(c.channel)
+    o_progress[] = pvals[s]
+    if s >= 3
+        @emit stopTimer()
+    end
+end
+
+on(o_ticks) do t
+    step(computation[])
+end
+
+function run!(c::Computation)
+    c.status = 1
+    global running
+    running = true
+    printinfo("calculating...")
+    (verbosity[] > 1) && println("calculating...")
+    PSA.driver!(ps_data,guiopts,gs,myprintln=printinfo)
+    setedittext(ps_data.zoom_list[ps_data.zoom_pos])
+    running = false
+    (verbosity[] > 1) && println("calculation done.")
+    c.status = 3
+end
+
+function setup_computation(key)
+    computation_key[] = key
+    computation[] = ChannelComputation(Channel(compute_chan))
+    o_progress[] = 0.0
+end
+
+on(o_gridpts) do s
+    local n
+    n = tryparse(Int, s)
+    if n === nothing
+        @warn "Invalid entry for npts"
+        return
+    end
+    global need_recomp
+    global need_redraw
+    if ! (ps_data === nothing)
+        curzoom = ps_data.zoom_list[ps_data.zoom_pos]
+        old_n = curzoom.npts
+        if n >= 5
+            if n != old_n
+                curzoom.npts = n
+                need_recomp = true
+                need_redraw = true
+                @emit enableGo(Int32(1))
+            end
+        else
+            # this should be obviated by QML logic.
+            @warn "npts must be at least 5; got $n"
+            o_gridpts[] = max(curzoom.npts, 5)
+        end
+    end
+end
+
+function update_ax(k, s::AbstractString)
+    global need_recomp
+    global need_redraw
+    local x
+    x = tryparse(Float64,s)
+    if x === nothing
+        @warn "Invalid entry for $k"
+        return
+    end
+    (ps_data === nothing) && return
+    curzoom = ps_data.zoom_list[ps_data.zoom_pos]
+    isempty(curzoom.ax) && (curzoom.ax = fill(NaN,(4,)))
+    curzoom.ax[axname2idx[k]] = x
+    need_recomp = true
+    if !any(isnan.(curzoom.ax)) # goable
+        @emit enableGo(Int32(1))
+    end
+end
+
+on(o_xmin) do s
+    update_ax(:xMin, s)
+end
+on(o_xmax) do s
+    update_ax(:xMax, s)
+end
+on(o_ymin) do s
+    update_ax(:yMin, s)
+end
+on(o_ymax) do s
+    update_ax(:yMax, s)
+end
+
 
 ################################################################
 # QMLFunctions: how the GUI talks to Julia
@@ -125,9 +279,8 @@ function setoptbydlg(optkey::AbstractString,val::AbstractString)
     local n,x
 
     if k == :ArpackMaxiter
-        try
-            n = parse(Int,val)
-        catch JE
+        n = tryparse(Int,val)
+        if n === nothing
             @warn "Invalid entry for ARPACK maxiter"
             return
         end
@@ -137,9 +290,8 @@ function setoptbydlg(optkey::AbstractString,val::AbstractString)
             ao_current = false
         end
     elseif k == :ArpackNcv
-        try
-            n = parse(Int,val)
-        catch JE
+        n = tryparse(Int,val)
+        if n === nothing
             @warn "Invalid entry for ARPACK ncv"
             return
         end
@@ -149,9 +301,8 @@ function setoptbydlg(optkey::AbstractString,val::AbstractString)
             ao_current = false
         end
     elseif k == :ArpackTol
-        try
-            x = parse(Float64,val)
-        catch JE
+        x = tryparse(Float64,val)
+        if x === nothing
             @warn "Invalid entry for ARPACK tol"
             return
         end
@@ -161,9 +312,8 @@ function setoptbydlg(optkey::AbstractString,val::AbstractString)
             ao_current = false
         end
     elseif k == :AbscissaEps
-        try
-            x = parse(Float64,val)
-        catch JE
+        x = tryparse(Float64,val)
+        if x ===  nothing
             @warn "Invalid entry for ϵ"
             return
         end
@@ -172,9 +322,8 @@ function setoptbydlg(optkey::AbstractString,val::AbstractString)
         end
         abscissacb(x)
     elseif k == :RadiusEps
-        try
-            x = parse(Float64,val)
-        catch JE
+        x = tryparse(Float64,val)
+        if x === nothing
             @warn "Invalid entry for ϵ"
             return
         end
@@ -183,9 +332,8 @@ function setoptbydlg(optkey::AbstractString,val::AbstractString)
         end
         radiuscb(x)
     elseif k == :ProjLev
-        try
-            x = parse(Float64,val)
-        catch JE
+        x = tryparse(Float64,val)
+        if x === nothing
             @warn "Invalid entry for Projection Level"
             return
         end
@@ -230,9 +378,8 @@ function setoptbykey(optkey::AbstractString,val::AbstractString)
         end
     elseif k == :kArpack
         if haskey(ps_dict,:arpack_opts)
-            try
-                n = parse(Int,val)
-            catch
+            n = tryparse(Int,val)
+            if n === nothing
                 @warn "Invalid entry for ARPACK k"
                 return
             end
@@ -246,9 +393,8 @@ function setoptbykey(optkey::AbstractString,val::AbstractString)
             end
         end
     elseif k == :npts
-        try
-            n = parse(Int,val)
-        catch
+        n = tryparse(Int,val)
+        if n === nothing
             @warn "Invalid entry for npts"
             return
         end
@@ -260,9 +406,8 @@ function setoptbykey(optkey::AbstractString,val::AbstractString)
         need_recomp = true
         goable = true
     elseif k ∈ keys(axname2idx)
-        try
-            x = parse(Float64,val)
-        catch
+        x = tryparse(Float64,val)
+        if x === nothing
             @warn "Invalid entry for $k"
             return
         end
@@ -271,9 +416,8 @@ function setoptbykey(optkey::AbstractString,val::AbstractString)
         need_recomp = true
         goable = !any(isnan.(curzoom.ax))
     elseif k ∈ [:first,:last,:step]
-        try
-            x = parse(Float64,val)
-        catch
+        x = tryparse(Float64,val)
+        if x === nothing
             @warn "Invalid entry for $k"
             return
         end
@@ -327,6 +471,32 @@ function smartlevels()
     nothing
 end
 
+function go()
+    global need_recomp
+    global need_redraw
+    if ps_data == nothing
+        @warn "go invoked before population"
+        return
+    end
+    @emit showPlot(Int32(1))
+    if need_recomp
+            println("opening channel")
+        setup_computation(0)
+        @emit startTimer()
+        need_recomp = false
+        need_redraw = false
+    elseif need_redraw
+        printinfo("redrawing")
+        PseudospectraPlots.redrawcontour(gs,ps_data,guiopts)
+        need_redraw = false
+    end
+#    ax = (mainpltobj != nothing) ? PSA.getxylims(mainpltobj) : zeros(0)
+    setedittext(ps_data.zoom_list[ps_data.zoom_pos])
+    printinfo("ready")
+    @emit enableGo(Int32(0))
+end
+
+# old channel logic follows
 function myproduce(chnl::Nothing,val)
     println("? cant produce to empty channel; val=",val)
 end
@@ -339,9 +509,11 @@ function compute(chnl)
     global running
     running = true
     printinfo("calculating...")
+    (verbosity[] > 1) && println("calculating...")
     PSA.driver!(ps_data,guiopts,gs,myprintln=printinfo)
     setedittext(ps_data.zoom_list[ps_data.zoom_pos])
     running = false
+    (verbosity[] > 1) && println("calculation done.")
     myproduce(chnl,-1)
     nothing
 end
@@ -350,19 +522,19 @@ end
 # Its role is to receive kicks from the compute task which
 # provoke GUI redraws.
 function monitor()
-#        println("monitor: attempting to take")
+    if compute_chnl == nothing
+        println("monitor nothing?")
+        return nothing
+    end
     status = take!(compute_chnl)
     if status <= 0
         @emit runTimer(Int32(0))
         printinfo("Done.")
-        if compute_chnl == nothing
-            println("done but no channel?")
-        end
         global compute_chnl = nothing
     end
 end
 
-function go()
+function go_old()
     global need_recomp
     global need_redraw
     if ps_data == nothing
@@ -388,13 +560,14 @@ function go()
     @emit enableGo(Int32(0))
 end
 
+# assorted callbacks
+
 function setselectedz(zrs::AbstractString,zis::AbstractString)
     global zselected
     zr,zi = NaN,NaN
-    try
-        zr = parse(Float64,zrs)
-        zi = parse(Float64,zis)
-    catch
+    zr = tryparse(Float64,zrs)
+    zi = tryparse(Float64,zis)
+    if zr === nothing || zi === nothing
         printwarning("invalid z")
         zr,zi = NaN,NaN
     end
@@ -422,9 +595,10 @@ function loadmtx(varname::AbstractString,myexpr::AbstractString)
     end
 
     try
-        eval(PSAData,parse("$(varname) = $(myexpr)"))
-        eval(Main.PSApp,
-             parse("ps_data = Pseudospectra.new_matrix(PSAData.$(varname),guiopts)"))
+        Core.eval(PSAData, Meta.parse("$(varname) = $(myexpr)"))
+        Core.eval(PseudospectraQML.PSApp,
+             Meta.parse("ps_data = Pseudospectra.new_matrix(PSAData.$(varname),guiopts)"))
+        (verbosity[] > 1) && println("Matrix has been digested.")
     catch JE
         printwarning("New Matrix failed. See console.")
         @warn "loadmtx failed, exception was $JE"
@@ -436,7 +610,7 @@ function loadmtx(varname::AbstractString,myexpr::AbstractString)
     guiopts = PSA.fillopts(gs,PSAData.getopts())
     refresh()
     firstcall = false
-    (verbosity > 1) && println("matrix loaded")
+    (verbosity[] > 1) && println("matrix loaded")
     nothing
 end
 
@@ -455,7 +629,7 @@ function savedata(varname::AbstractString,mykey)
         return
     end
     try
-        eval(Main,parse("$(varname) = deepcopy($(mymodname).tmpdata)"))
+        eval(Main,Meta.parse("$(varname) = deepcopy($(mymodname).tmpdata)"))
     catch JE
         @warn "savedata failed, exception was $JE"
     end
@@ -548,7 +722,6 @@ end
 
 qmlfunction("loadmtx", loadmtx)
 qmlfunction("savedata", savedata)
-qmlfunction("initmsg", initmsg)
 qmlfunction("go", go)
 qmlfunction("use_eigs", use_eigs)
 qmlfunction("setoptbykey", setoptbykey)
@@ -600,7 +773,7 @@ function ploteigv()
         printwarning("Select z first.")
     else
         # TODO: wrap in gui stupefy/waken
-        PSA.modeplot(ps_data,gs,0,zgetter=getguiz)
+        PSA.modeplot(ps_data, 0; gs=gs, zgetter=getguiz)
         @emit showPlot2(Int32(1))
     end
 end
@@ -609,7 +782,7 @@ function plotpmode()
         printwarning("Select z first.")
     else
         # TODO: wrap in gui stupefy/waken
-        PSA.modeplot(ps_data,gs,1,zgetter=getguiz)
+        PSA.modeplot(ps_data, 1; gs=gs, zgetter=getguiz)
         @emit showPlot2(Int32(1))
     end
 end
@@ -674,9 +847,10 @@ function drawcmd(gs::PlotsGUIState,ph,id)
             display(maindisplay, ph)
         end
         if running
-            myproduce(compute_chnl,1)
+            println("drawcmd called while running")
+            #myproduce(compute_chnl,1)
             sleep(0.01)
-            myproduce(compute_chnl,1)
+            #myproduce(compute_chnl,1)
         end
     else
         pltobj2 = ph
@@ -751,31 +925,23 @@ end
 place some text in the main App banner
 """
 function printbanner(msg::AbstractString)
-    @emit setMainMsg(msg,Int32(0))
+    o_banner_msg[] = msg
 end
 
 """
 place some text into the informational text area
 """
 function printinfo(msg::AbstractString)
-    @emit setMainMsg(msg,Int32(1))
-    if running
-        myproduce(compute_chnl,1)
-        sleep(0.01)
-        myproduce(compute_chnl,1)
-    end
+    o_info_msg[] = msg
+    # TODO: set an info color or icon
 end
 
 """
-place some text into the informational text area
+place a warning into the informational text area
 """
 function printwarning(msg::AbstractString)
-    @emit setMainMsg(msg,Int32(2))
-    if running
-        myproduce(compute_chnl,1)
-        sleep(0.01)
-        myproduce(compute_chnl,1)
-    end
+    o_info_msg[] = msg
+    # TODO: set a warning color or icon
 end
 
 """
@@ -856,10 +1022,11 @@ gs = PlotsGUIState(nothing,0,drawcmd)
 # we are not inchoate.
 
 if !isempty(PSAData.getdefaultmtx())
-    (verbosity > 0) && println("Using existing matrix from PSAData")
+    (verbosity[] > 0) && println("Using existing matrix from PSAData")
     # guiopts is empty until now
     merge!(guiopts,PSA.fillopts(gs,PSAData.opts))
     ps_data = PSA.new_matrix(PSAData.getdefaultmtx(),guiopts)
+    (verbosity[] > 1) && println("Matrix has been digested.")
     # forget opts that should not apply to newly ingested data
     # viz. when new_matrix() is invoked from GUI.
     PSAData.clearopts(false)
@@ -869,7 +1036,7 @@ end
 
 qml_file = joinpath(dirname(@__FILE__), "psagui.qml")
 
-load(qml_file, timer = QTimer())
+load(qml_file, timer=timer, observables=propmap)
 
 if !isempty(PSAData.getdefaultmtx())
     refresh()

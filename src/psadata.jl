@@ -5,6 +5,7 @@ so we can run the GUI code as a script after they are defined.
 """
 module PSAData
 import Pseudospectra
+using LinearAlgebra
 
 # allow shorthand
 PSA = Pseudospectra

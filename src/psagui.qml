@@ -35,7 +35,7 @@ ApplicationWindow {
     // Set up timer connection
     Connections {
 	target: timer
-	function onTimeout() { Julia.monitor(); }
+	function onTimeout() { observables.ticks += 1; }
     }
 
     // diaglog box for setting a parameter
@@ -148,7 +148,7 @@ ApplicationWindow {
 	    spacing:6
 	    Text {
 		id: pickZDlgText
-		text: "author: please rewrite pickZDlgText"
+		text: "Specify z for mode analysis"
 	    }
 	    RowLayout {
 		spacing: 6
@@ -536,6 +536,15 @@ ApplicationWindow {
 		pickZDlg.visible = true;
 	    }
 */
+	    signal startTimer()
+	    onStartTimer: {
+		timer.start(10);
+	    }
+	    signal stopTimer()
+	    onStopTimer: {
+		timer.stop();
+	    }
+
 	    signal runTimer(var x) // int
 	    onRunTimer: {
 		if (x > 0) {
@@ -571,7 +580,7 @@ ApplicationWindow {
 		anchors.leftMargin: 6
 		anchors.verticalCenter: parent.verticalCenter
 		font.pointSize: 20; font.bold: true;
-		text: Julia.initmsg() /* only used for initialization */
+		text: observables.banner_msg
             }
 	}
 
@@ -713,9 +722,9 @@ ApplicationWindow {
 			    Layout.alignment: Qt.AlignCenter
 			    Layout.minimumWidth: 30
 			    Layout.preferredWidth: 40
-			    placeholderText: qsTr("0")
-			    validator: IntValidator {}
-			    onTextChanged: Julia.setoptbykey("npts",gridSize.text)
+			    placeholderText: qsTr("24")
+			    validator: IntValidator { bottom: 5; }
+			    onEditingFinished: observables.gridpts = gridSize.text
 			}
 		    }
 		}
@@ -791,7 +800,7 @@ ApplicationWindow {
 			    Layout.preferredWidth: 70
 			    placeholderText: qsTr("0")
 			    validator: DoubleValidator {}
-			    onEditingFinished: Julia.setoptbykey("yMax",yMax.text)
+			    onEditingFinished: observables.ymax = yMax.text
 			}
 		    }
 
@@ -807,7 +816,7 @@ ApplicationWindow {
 			    Layout.preferredWidth: 70
 			    placeholderText: qsTr("0")
 			    validator: DoubleValidator {}
-			    onEditingFinished: Julia.setoptbykey("xMin",xMin.text)
+			    onEditingFinished: observables.xmin = xMin.text
 			}
 			Text {
 			    text: " X max: " /* note cheap kerning */
@@ -820,7 +829,7 @@ ApplicationWindow {
 			    Layout.preferredWidth: 70
 			    placeholderText: qsTr("0")
 			    validator: DoubleValidator {}
-			    onEditingFinished: Julia.setoptbykey("xMax",xMax.text)
+			    onEditingFinished: observables.xmax = xMax.text
 			}
 		    }
 
@@ -837,7 +846,7 @@ ApplicationWindow {
 			    Layout.preferredWidth: 70
 			    placeholderText: qsTr("0")
 			    validator: DoubleValidator {}
-			    onEditingFinished: Julia.setoptbykey("yMin",yMin.text)
+			    onEditingFinished: observables.ymin = yMin.text
 			}
 		    }
 
@@ -1002,8 +1011,7 @@ ApplicationWindow {
 		anchors.leftMargin: 6
 		anchors.verticalCenter: parent.verticalCenter
 		font.pointSize: 12;
-		// we tried a context property here, but updates are erratic
-		text: "watch for news here"
+		text: observables.info_msg
             }
 	}
 
