@@ -32,6 +32,8 @@ function psagui(A::AbstractMatrix,opts::Dict{Symbol,Any}=Dict{Symbol,Any}())
     Base.invokelatest(PSAData.setdefaultmatrix,A)
     isempty(opts) || Base.invokelatest(PSAData.addopts,opts)
     include(joinpath(pvsrcdir,"psagui.jl"))
+    results = Base.invokelatest(PSApp.runme)
+    return (length(keys(results)) == 0) ? nothing : results
 end
 
 end # module

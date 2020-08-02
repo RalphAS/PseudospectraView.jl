@@ -10,12 +10,18 @@ using Observables
 
 const verbosity = Ref(2)
 
+const results = Dict{Symbol,Any}()
+
 # Python must not manage a gui:
 ENV["MPLBACKEND"] = "Agg"
 using Plots
-# It's too easy to get a less functional backend, so let's discourage that.
-pyplot()
-(verbosity[] > 1) && println("Plots loaded.")
+
+# Other backends are not yet really functional, so try to force this for now.
+if get(ENV,"PSA_MPL","1") != "0"
+    pyplot()
+end
+
+(verbosity[] > 1) && println("Plots loaded, backend is $(typeof(Plots.backend())).")
 
 using Pseudospectra
 # shorthand
@@ -44,9 +50,11 @@ using LinearAlgebra
 
 maindisplay = nothing
 mainpltobj = nothing
+const mainsize = [0,0]
 
 otherdisplay = nothing
 pltobj2 = nothing
+const othersize = [0,0]
 
 # the instance of PSA opts maintained by the GUI
 guiopts = Dict{Symbol,Any}()
@@ -91,7 +99,16 @@ const o_xmin = Observable("")
 const o_xmax = Observable("")
 const o_ymin = Observable("")
 const o_ymax = Observable("")
+const o_firstlev = Observable("")
+const o_lastlev = Observable("")
+const o_levstep = Observable("")
+const o_fov = Observable(Cint(0))
+const o_imaxis = Observable(Cint(0))
+const o_unitcircle = Observable(Cint(0))
+const o_arpack_nev = Observable("6")
+const o_arpack_which = Observable("LM")
 const o_ticks = Observable(Cint(0)) # Number of times the timer has ticked
+const o_verbosity = Observable(Cint(verbosity[]))
 
 propmap = JuliaPropertyMap(
     "computationkey" => computation_key,
@@ -103,6 +120,15 @@ propmap = JuliaPropertyMap(
     "ticks" => o_ticks,
     "banner_msg" => o_banner_msg,
     "info_msg" => o_info_msg,
+    "firstlev" => o_firstlev,
+    "lastlev" => o_lastlev,
+    "levstep" => o_levstep,
+    "fov" => o_fov,
+    "imag_axis" => o_imaxis,
+    "unit_circle" => o_unitcircle,
+    "arpack_nev" => o_arpack_nev,
+    "arpack_which" => o_arpack_which,
+    "verbosity" => o_verbosity,
 )
 
 mutable struct Computation
@@ -153,6 +179,7 @@ function run!(c::Computation)
     setedittext(ps_data.zoom_list[ps_data.zoom_pos])
     running = false
     (verbosity[] > 1) && println("calculation done.")
+    printinfo("done.")
     c.status = 3
 end
 
@@ -221,6 +248,96 @@ on(o_ymax) do s
     update_ax(:yMax, s)
 end
 
+function update_levels(k, s)
+    global need_redraw
+    x = tryparse(Float64, s)
+    if x === nothing
+        @warn "Invalid entry for contour levels $k"
+        return
+    end
+    curzoom = ps_data.zoom_list[ps_data.zoom_pos]
+    setfield!(curzoom.levels, k, x)
+    curzoom.autolev = false
+    need_redraw = true
+    @emit enableGo(Int32(1))
+end
+on(o_firstlev) do s
+    update_levels(:first, s)
+end
+on(o_lastlev) do s
+    update_levels(:last, s)
+end
+on(o_levstep) do s
+    update_levels(:step, s)
+end
+
+on(o_arpack_nev) do s
+    global need_recomp
+    ps_dict = ps_data.ps_dict
+    if haskey(ps_dict,:arpack_opts)
+        n = tryparse(Int, s)
+        if n === nothing
+            @warn "Invalid entry for ARPACK nev"
+            return
+        end
+        if (n < 1) || (n > size(ps_data.input_matrix,1)-2)
+            @warn "Invalid entry for ARPACK nev"
+        end
+        if ps_dict[:arpack_opts].nev != n
+            ps_dict[:arpack_opts].nev = n
+            ps_dict[:proj_valid] = false
+            need_recomp = true
+            @emit enableGo(Int32(1))
+        end
+    end
+end
+
+on(o_arpack_which) do s
+    (verbosity[] > 1) && println("attempting to set which to $s")
+    global need_recomp
+    ps_dict = ps_data.ps_dict
+    if s ∈ ["LM", "SM", "LR", "SR", "LI", "SI"]
+        if haskey(ps_dict,:arpack_opts)
+            if ps_dict[:arpack_opts].which != Symbol(s)
+                ps_dict[:arpack_opts].which = Symbol(s)
+                need_recomp = true
+                @emit enableGo(Int32(1))
+            end
+        end
+    else
+        @warn "Invalid entry for ARPACK \"which\""
+    end
+end
+
+on(o_fov) do s
+    tf = Bool(s)
+    global need_redraw
+    if get(guiopts,:showfov,false) != tf
+        need_redraw = true
+        @emit enableGo(Int32(1))
+    end
+    guiopts[:showfov] = tf
+end
+
+on(o_imaxis) do s
+    tf = Bool(s)
+    global need_redraw
+    if get(guiopts,:showimagax,false) != tf
+        need_redraw = true
+        @emit enableGo(Int32(1))
+    end
+    guiopts[:showimagax] = tf
+end
+
+on(o_unitcircle) do s
+    tf = Bool(s)
+    global need_redraw
+    if get(guiopts,:showunitcircle,false) != tf
+        need_redraw = true
+        @emit enableGo(Int32(1))
+    end
+    guiopts[:showunitcircle] = tf
+end
 
 ################################################################
 # QMLFunctions: how the GUI talks to Julia
@@ -230,12 +347,29 @@ end
 # These are called by the App code, apparently only on setup or resize
 # Display is generally forced via drawcmd().
 
-function init_backend(width::Float64, height::Float64)
+# somebody doesn't manage dimensions correctly
+const pyplot_fudge = 0.9
+
+function init_backend(width::Float64, height::Float64, idx)
     if width < 5 || height < 5
         return
     end
-    # FIXME: allow other backends for Plots.
-    pyplot(size=(Int64(round(width)),Int64(round(height))))
+    if idx == 1
+        mainsize .= round.(Int,[width,height])
+    else
+        othersize .= round.(Int,[width,height])
+    end
+    if isa(Plots.backend(),Plots.PyPlotBackend)
+        pyplot(size=(round(Int64,pyplot_fudge*width),
+                     round(Int64,height)))
+    elseif isa(Plots.backend(),Plots.GRBackend)
+        @warn "Support for GR backend is incomplete; expect trouble." maxlog=1
+        # CHECKME: GR may need a vertical fudge factor
+        gr(size=(round(Int64,width),round(Int64,height)))
+        Plots.GR.inline()
+    else
+        @error "unsupported Plots backend"
+    end
     return
 end
 
@@ -353,99 +487,6 @@ function setoptbydlg(optkey::AbstractString,val::AbstractString)
     return
 end
 
-function setoptbykey(optkey::AbstractString,val::AbstractString)
-    k = Symbol(optkey);
-    global need_recomp
-    global need_redraw
-    goable = false
-    local x,n
-    if ps_data == nothing
-        # FIXME: should we populate opts instead?
-        (k == :which) && return # known case
-        @warn "setopt invoked before pop for $optkey"
-        return
-    end
-    ps_dict = ps_data.ps_dict
-    curzoom = ps_data.zoom_list[ps_data.zoom_pos]
-    # Treat ARPACK params shown on main GUI window specially:
-    # following upstream we expect user to verify them before "Update".
-    if k == :which
-        if haskey(ps_dict,:arpack_opts)
-            if ps_dict[:arpack_opts].which != Symbol(val)
-                ps_dict[:arpack_opts].which = Symbol(val)
-                need_recomp = true
-            end
-        end
-    elseif k == :kArpack
-        if haskey(ps_dict,:arpack_opts)
-            n = tryparse(Int,val)
-            if n === nothing
-                @warn "Invalid entry for ARPACK k"
-                return
-            end
-            if (n < 1) || (n > size(ps_data.input_matrix,1)-2)
-                @warn "Invalid entry for ARPACK k"
-            end
-            if ps_dict[:arpack_opts].nev != n
-                ps_dict[:arpack_opts].nev = n
-                ps_dict[:proj_valid] = false
-                need_recomp = true
-            end
-        end
-    elseif k == :npts
-        n = tryparse(Int,val)
-        if n === nothing
-            @warn "Invalid entry for npts"
-            return
-        end
-        if n < 5
-            @warn "npts must be at least 5; got $n"
-            return
-        end
-        curzoom.npts = n
-        need_recomp = true
-        goable = true
-    elseif k ∈ keys(axname2idx)
-        x = tryparse(Float64,val)
-        if x === nothing
-            @warn "Invalid entry for $k"
-            return
-        end
-        isempty(curzoom.ax) && (curzoom.ax = fill(NaN,(4,)))
-        curzoom.ax[axname2idx[k]] = x
-        need_recomp = true
-        goable = !any(isnan.(curzoom.ax))
-    elseif k ∈ [:first,:last,:step]
-        x = tryparse(Float64,val)
-        if x === nothing
-            @warn "Invalid entry for $k"
-            return
-        end
-        setfield!(curzoom.levels,k,x)
-        curzoom.autolev = false
-        need_redraw = true
-        goable = true
-    elseif k ∈ [:showimagax, :showunitcircle]
-        guiopts[k] = parse(Bool,val)
-        need_redraw = true
-        goable = true
-    elseif k == :showFov
-        tf = (val == "true")
-        if get(guiopts,:showfov,false) != tf
-            need_redraw = true
-            goable = true
-        end
-        guiopts[:showfov] = tf
-    else
-        @warn "setoptbykey: unrecognized key $k"
-    end
-
-    if goable
-        @emit enableGo(Int32(1))
-    end
-    return
-end
-
 function smartlevels()
     global need_redraw
     if ps_data == nothing
@@ -480,7 +521,7 @@ function go()
     end
     @emit showPlot(Int32(1))
     if need_recomp
-            println("opening channel")
+        println("opening channel for computation task")
         setup_computation(0)
         @emit startTimer()
         need_recomp = false
@@ -496,69 +537,6 @@ function go()
     @emit enableGo(Int32(0))
 end
 
-# old channel logic follows
-function myproduce(chnl::Nothing,val)
-    println("? cant produce to empty channel; val=",val)
-end
-
-myproduce(chnl,val) = put!(chnl,val)
-
-function compute(chnl)
-    # println("compute arg is ",typeof(chnl))
-    myproduce(chnl,2)
-    global running
-    running = true
-    printinfo("calculating...")
-    (verbosity[] > 1) && println("calculating...")
-    PSA.driver!(ps_data,guiopts,gs,myprintln=printinfo)
-    setedittext(ps_data.zoom_list[ps_data.zoom_pos])
-    running = false
-    (verbosity[] > 1) && println("calculation done.")
-    myproduce(chnl,-1)
-    nothing
-end
-
-# This code runs in the main task, invoked by the QTimer.
-# Its role is to receive kicks from the compute task which
-# provoke GUI redraws.
-function monitor()
-    if compute_chnl == nothing
-        println("monitor nothing?")
-        return nothing
-    end
-    status = take!(compute_chnl)
-    if status <= 0
-        @emit runTimer(Int32(0))
-        printinfo("Done.")
-        global compute_chnl = nothing
-    end
-end
-
-function go_old()
-    global need_recomp
-    global need_redraw
-    if ps_data == nothing
-        @warn "go invoked before population"
-        return
-    end
-    @emit showPlot(Int32(1))
-    global compute_chnl
-    if need_recomp
-#            println("opening channel")
-        compute_chnl = Channel(compute)
-        @emit runTimer(Int32(1))
-        need_recomp = false
-        need_redraw = false
-    elseif need_redraw
-        printinfo("redrawing")
-        PseudospectraPlots.redrawcontour(gs,ps_data,guiopts)
-        need_redraw = false
-    end
-#    ax = (mainpltobj != nothing) ? PSA.getxylims(mainpltobj) : zeros(0)
-    setedittext(ps_data.zoom_list[ps_data.zoom_pos])
-    printinfo("ready")
-    @emit enableGo(Int32(0))
-end
 
 # assorted callbacks
 
@@ -615,8 +593,6 @@ function loadmtx(varname::AbstractString,myexpr::AbstractString)
 end
 
 function savedata(varname::AbstractString,mykey)
-    mymodname = current_module()
-    global tmpdata
     # FIXME: test for valid variable name
     if mykey == "portrait"
         tmpdata = ps_data.zoom_list[ps_data.zoom_pos]
@@ -624,12 +600,14 @@ function savedata(varname::AbstractString,mykey)
         tmpdata = ps_data
     elseif mykey == "zpsradius"
         tmpdata = ps_data.ps_dict[:zpsradius]
+    elseif mykey == "zpsabscissa"
+        tmpdata = ps_data.ps_dict[:zpsabscissa]
     else
         @warn "unrecognized save key $mykey"
         return
     end
     try
-        eval(Main,Meta.parse("$(varname) = deepcopy($(mymodname).tmpdata)"))
+        results[Symbol(varname)] = deepcopy(tmpdata)
     catch JE
         @warn "savedata failed, exception was $JE"
     end
@@ -669,6 +647,7 @@ function use_eigs(x::Int32)
         end
         if (ps_data.zoom_list[ps_data.zoom_pos].computed
             && !isempty(get(ps_dict,:schur_mtx,zeros(0))))
+            # CHECKME: what's the reasoning here?
             @emit toggleFoV(Int32(1))
         end
     else
@@ -684,19 +663,35 @@ function use_eigs(x::Int32)
     @emit enableGo(Int32(1))
 end
 
-function mainzoom(inorout::Int32, xpxl::Float64, ypxl::Float64, yref::Float64)
-    zooming_in = (inorout == 0)
-    if !isa(Plots.backend(),Plots.PyPlotBackend)
-        printwarning("zooming requires PyPlot backend")
+function zmoused(leftright::Int32, xpxl::Float64, ypxl::Float64, yref::Float64)
+    if isa(Plots.backend(),Plots.PyPlotBackend)
+        fig = gs.mainph.o
+        ax_plt = fig.axes[1]
+        inv = ax_plt.transData.inverted()
+        xscaled = xpxl * pyplot_fudge
+        xy = inv.transform((xscaled,yref+1-ypxl))
+    elseif isa(Plots.backend(),Plots.GRBackend)
+        fig = Plots.GR.gcf()
+        nc, nr = mainsize # fig[:size]
+        # println("GR thinks size is $nc $nr")
+        fac = (nc > nr) ? (1.0 / nc) : (1.0 / nr)
+        xndc = fac * xpxl
+        yndc = fac * (yref+1-ypxl)
+        xy = Plots.GR.ndctowc(xndc, yndc)
+    else
+        printwarning("zooming or point selection not implemented for $(typeof(Plots.backend()))")
         return nothing
     end
-    fig = gs.mainph.o
-    ax_plt = fig.axes[1]
-    inv = ax_plt.transData.inverted()
-    xy = inv.transform((xpxl,yref+1-ypxl))
-    # println("zooming "*ifelse(zooming_in,"in","out")*
-    #         " at $xy for $yref $ypxl")
+    (verbosity[] > 1) && println("selected $xy from yvals $yref $ypxl")
     z = xy[1]+1im*xy[2]
+    if true
+        zooming_in = (leftright == 0)
+        mainzoom(zooming_in, z)
+    else
+    end
+end
+
+function mainzoom(zooming_in::Bool, z)
     ax = PseudospectraPlots.getxylims(gs.mainph)
     if zooming_in
         res = zoomin!(ps_data,z,ax)
@@ -724,11 +719,10 @@ qmlfunction("loadmtx", loadmtx)
 qmlfunction("savedata", savedata)
 qmlfunction("go", go)
 qmlfunction("use_eigs", use_eigs)
-qmlfunction("setoptbykey", setoptbykey)
 qmlfunction("setoptbydlg", setoptbydlg)
 qmlfunction("setselectedz", setselectedz)
-qmlfunction("monitor", monitor)
-qmlfunction("mainzoom", mainzoom)
+# qmlfunction("monitor", monitor)
+qmlfunction("zmoused", zmoused)
 
 #=
 # This looks clever but deadlocks
@@ -752,19 +746,19 @@ end
 
 function abscissacb(epsilon)
     f,z = PSA.psa_abscissa(ps_data.input_matrix,epsilon)
-    print("abscissa(ϵ = $epsilon): $f at ",z)
+    println("abscissa(ϵ = $epsilon): $f at ",z)
     msg = "abscissa(ϵ = $epsilon) = $f at $(z[1])"
     printinfo(msg)
-    ps_data.ps_dict[:zpsabscissa] = z
+    ps_data.ps_dict[:zpsabscissa] = (ϵ = epsilon, x = f, z = z)
     @emit saveVariable("Save point(s) at pseudospectral abscissa","zpsabscissa")
 end
 
 function radiuscb(epsilon)
     f,z = PSA.psa_radius(ps_data.input_matrix,epsilon)
-    print("radius(ϵ = $epsilon): $f at ",z)
+    println("radius(ϵ = $epsilon): $f at ",z)
     msg = "radius(ϵ = $epsilon) = $f at $(z[1])"
     printinfo(msg)
-    ps_data.ps_dict[:zpsradius] = z
+    ps_data.ps_dict[:zpsradius] = (ϵ = epsilon, r = f, z = z)
     @emit saveVariable("Save point(s) at pseudospectral radius","zpsradius")
 end
 
@@ -847,7 +841,7 @@ function drawcmd(gs::PlotsGUIState,ph,id)
             display(maindisplay, ph)
         end
         if running
-            println("drawcmd called while running")
+            #println("drawcmd called while running")
             #myproduce(compute_chnl,1)
             sleep(0.01)
             #myproduce(compute_chnl,1)
@@ -1042,7 +1036,10 @@ if !isempty(PSAData.getdefaultmtx())
     refresh()
 end
 
-# Run the application
-QML.exec()
+function runme()
+    # Run the application
+    QML.exec()
+    return results
+end
 
 end

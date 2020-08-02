@@ -16,7 +16,20 @@
 # Introduction
 PseudospectraQML is a Julia/Qt GUI for analyzing nonsymmetric matrices by
 displaying eigenvalues and pseudospectra, along with related properties.
-It is built as a driver for [Pseudospectra.jl](https://github.com/RalphAS/Pseudospectra.jl).
+It is largely based on the famous
+[EigTool](http://www.cs.ox.ac.uk/pseudospectra/eigtool/) from Oxford.
+It uses computational routines from
+[Pseudospectra.jl](https://github.com/RalphAS/Pseudospectra.jl).
+
+# Warning
+
+This package is experimental and may misbehave (i.e., some remaining
+bugs may deadlock or crash a Julia session), so save any valuable
+results before running the app.  It is quite complicated and has some
+tricky dependencies, so it takes a while to load and may have control
+flow bugs. That said, most of the basic functionality is there.
+So interested users are encouraged to try it out and report problems:
+please provide details of how to reproduce the latter.
 
 # Installation
 
@@ -38,20 +51,21 @@ Invoke the App with
 ```julia
 using QML
 using PseudospectraQML
-A=your_matrix_generating_function()
-psagui(A)
+A = your_matrix_generating_function()
+saved_vars = psagui(A)
 ```
 
 (Alternatively one can invoke `psagui()` with no arguments, and
-run the `File/New Matrix` menu command.)
+run the `File/New Matrix` menu command, but that operates in a
+context which may not have what you need for your matrix.)
 
 Please be patient; the infrastructure takes a while to initialize.
-An app window should appear, and a spectral portrait (i.e. a contour
-plot of base-10 logarithms of inverse resolvent norms) should be shown
-in the main display.
-
-The GUI is not yet "self-sufficient"; some important diagnostic messages
-and a few prompts for user input are still sent to the REPL.
+An app window should appear. If the matrix is not large, a spectral portrait
+(i.e. a contour plot of base-10 logarithms of inverse resolvent norms) should
+be shown in the main display area. If the matrix is large, one can
+select `Direct` if one is patient, or select parameters for the
+iterative scheme in ARPACK to compute pseudospectra for a reduced
+form, then press `Update` for computation and display.
 
 The default mesh is very coarse; adjust the grid size and axis limits to
 taste and press the "Update" button to recompute.
@@ -63,7 +77,7 @@ involves recomputation.
 To display an eigenmode or pseudo-eigenmode, use the "Select z" button to
 specify the value, then the appropriate mode button.
 
-## FIXME: walk-throughs with screenshots needed here
+## TODO: walk-throughs with screenshots needed here
 
 Most GUI behavior mimics EigTool.
 Much of [the EigTool documentation](http://www.cs.ox.ac.uk/pseudospectra/eigtool/documentation/index.html)
@@ -76,7 +90,11 @@ To save a plot for external use, the recommended procedure is as follows:
 3. use fields of the saved variable to make a plot
 E.g., if you saved the `Portrait` as variable `baz`,
 ```julia
+saved_vars = psagui(A)
+# run the app, then close the window
+
 using Plots
+baz = saved_vars[:baz]
 contour(baz.x,baz.y,baz.Z)
 png("baz")
 ```

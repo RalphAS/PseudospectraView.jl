@@ -64,7 +64,7 @@ ApplicationWindow {
 	}
     }
 
-    // dialog box for 
+    // dialog box for ingesting a new matrix
     Dialog {
 	id: newMtxDlg
 	visible: false
@@ -110,7 +110,7 @@ ApplicationWindow {
 	visible: false
         property string curkey
 	modality: Qt.WindowModal
-	title: "Save Data to Main"
+	title: "Save Data to Variable"
 	standardButtons: StandardButton.Save | StandardButton.Cancel
 	onAccepted: Julia.savedata(saveVarName.text,curkey)
 	ColumnLayout {
@@ -124,7 +124,7 @@ ApplicationWindow {
 	    }
 	    Text {
 		font.bold: true;
-		text: "This variable will be in the global scope of the Main module."
+		text: "This variable will be stored in the Dict returned by psagui."
 	    }
 
             TextField {
@@ -298,10 +298,7 @@ ApplicationWindow {
 		checkable: true
 		checked: false
 		onToggled: {
-		    if (showImagAxis.checked)
-			Julia.setoptbykey("showimagax","true");
-		    else
-			Julia.setoptbykey("showimagax","false");
+		    observables.imag_axis = checked
 		}
             }
             MenuItem {
@@ -310,10 +307,7 @@ ApplicationWindow {
 		checkable: true
 		checked: false
 		onToggled: {
-		    if (showUnitCircle.checked)
-			Julia.setoptbykey("showunitcircle","true");
-		    else
-			Julia.setoptbykey("showunitcircle","false");
+		    observables.unit_circle = checked
 		}
             }
             MenuItem {
@@ -398,7 +392,7 @@ ApplicationWindow {
 	{
             if(jdisp === null)
 		return;
-            Julia.init_backend(jdisp.width, jdisp.height);
+            Julia.init_backend(jdisp.width, jdisp.height, 1);
             do_plot();
 	}
 
@@ -415,7 +409,7 @@ ApplicationWindow {
             if(jdisp2 === null)
 		return;
 
-            Julia.init_backend(jdisp2.width, jdisp2.height);
+            Julia.init_backend(jdisp2.width, jdisp2.height, 2);
             do_plot2();
 	}
 
@@ -628,9 +622,9 @@ ApplicationWindow {
 			acceptedButtons: Qt.LeftButton | Qt.RightButton
 			onClicked: {
 			    if (mouse.button == Qt.LeftButton)
-				Julia.mainzoom(0, mouse.x, mouse.y, jdisp.height);
+				Julia.zmoused(0, mouse.x, mouse.y, jdisp.height);
 			    else
-				Julia.mainzoom(1, mouse.x, mouse.y, jdisp.height);
+				Julia.zmoused(1, mouse.x, mouse.y, jdisp.height);
 			}
 		    }
 		}
@@ -670,10 +664,7 @@ ApplicationWindow {
 			    text: "Show numerical range"
 			    checked: false
 			    onClicked: {
-				if (fovCkBox.checked)
-				    Julia.setoptbykey("showFov","true");
-				else
-				    Julia.setoptbykey("showFov","false");
+				observables.fov = checked
 			    }
 			}
 			Button {
@@ -750,8 +741,9 @@ ApplicationWindow {
 		}
 	    }
 
-	} /* main middle row */
+	}
 
+	/* main middle row */
 	RowLayout {
 
             Layout.alignment: Qt.AlignBottom
@@ -763,25 +755,6 @@ ApplicationWindow {
 		Layout.alignment: Qt.AlignTop
 		ColumnLayout{
 		    Layout.alignment: Qt.AlignCenter
-		    /*
-		      ExclusiveGroup { id:axlims }
-		      RadioButton {
-		      text: "Auto"
-		      checked: true
-		      exclusiveGroup: axlims
-		      onClicked: Julia.setoptbykey("autolims","true")
-		      }
-		      RadioButton {
-		      text: "Take from plot"
-		      exclusiveGroup: axlims
-		      onClicked: Julia.set_axes_fig()
-		      }
-		      RadioButton {
-		      text: "Set from here"
-		      exclusiveGroup: axlims
-		      onClicked: Julia.set_axes(xMin,yMin,xMax,yMax)
-		      }
-		    */
 		    CheckBox {
 			id: autoaxisCkBox
 			text: "Auto"
@@ -882,7 +855,7 @@ ApplicationWindow {
 			    Layout.preferredWidth: 40
 			    placeholderText: qsTr("6")
 			    inputMethodHints: Qt.ImhDigitsOnly
-			    onEditingFinished: Julia.setoptbykey("kArpack",kArpack.text)
+			    onEditingFinished: observables.arpack_nev = kArpack.text
 			}
 		    }
 		    ComboBox {
@@ -927,7 +900,7 @@ ApplicationWindow {
 			}
 			onCurrentIndexChanged: {
 			    whichArpackBox.curkey = arpackcb.get(currentIndex).key
-			    Julia.setoptbykey("which",whichArpackBox.curkey);
+			    observables.arpack_which = whichArpackBox.curkey;
 			}
 		    }
 		}
@@ -953,8 +926,8 @@ ApplicationWindow {
 			    Layout.minimumWidth: 20
 			    Layout.preferredWidth: 60
 			    placeholderText: qsTr("0")
-			    inputMethodHints: Qt.ImhFormattedNumbersOnly
-			    onEditingFinished: Julia.setoptbykey("last",ctrMax.text)
+			    validator: DoubleValidator{}
+			    onEditingFinished: observables.lastlev = ctrMax.text
 			}
 		    }
 		    RowLayout {
@@ -968,8 +941,8 @@ ApplicationWindow {
 			    Layout.minimumWidth: 20
 			    Layout.preferredWidth: 60
 			    placeholderText: qsTr("0")
-			    inputMethodHints: Qt.ImhFormattedNumbersOnly
-			    onEditingFinished: Julia.setoptbykey("first",ctrMin.text)
+			    validator: DoubleValidator {}
+			    onEditingFinished: observables.firstlev = ctrMin.text
 			}
 		    }
 		    RowLayout {
@@ -983,8 +956,8 @@ ApplicationWindow {
 			    Layout.minimumWidth: 20
 			    Layout.preferredWidth: 60
 			    placeholderText: qsTr("0")
-			    inputMethodHints: Qt.ImhFormattedNumbersOnly
-			    onEditingFinished: Julia.setoptbykey("step",ctrStep.text)
+			    validator: DoubleValidator {}
+			    onEditingFinished: observables.levstep = ctrStep.text
 			}
 		    }
 		}
