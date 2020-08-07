@@ -8,7 +8,8 @@ ENV["QSG_RENDER_LOOP"] = "basic"
 using QML
 using Observables
 
-const verbosity = Ref(2)
+using ..PseudospectraQML: _verbosity
+verbosity() = _verbosity[]
 
 const results = Dict{Symbol,Any}()
 
@@ -21,7 +22,7 @@ if get(ENV,"PSA_MPL","1") != "0"
     pyplot()
 end
 
-(verbosity[] > 1) && println("Plots loaded, backend is $(typeof(Plots.backend())).")
+(verbosity() > 1) && println("Plots loaded, backend is $(typeof(Plots.backend())).")
 
 using Pseudospectra
 # shorthand
@@ -106,9 +107,9 @@ const o_fov = Observable(Cint(0))
 const o_imaxis = Observable(Cint(0))
 const o_unitcircle = Observable(Cint(0))
 const o_arpack_nev = Observable("6")
+const o_arpack_ncv = Observable("6")
 const o_arpack_which = Observable("LM")
 const o_ticks = Observable(Cint(0)) # Number of times the timer has ticked
-const o_verbosity = Observable(Cint(verbosity[]))
 
 propmap = JuliaPropertyMap(
     "computationkey" => computation_key,
@@ -127,8 +128,8 @@ propmap = JuliaPropertyMap(
     "imag_axis" => o_imaxis,
     "unit_circle" => o_unitcircle,
     "arpack_nev" => o_arpack_nev,
+    "arpack_ncv" => o_arpack_ncv,
     "arpack_which" => o_arpack_which,
-    "verbosity" => o_verbosity,
 )
 
 mutable struct Computation
@@ -148,7 +149,7 @@ struct ChannelComputation
     channel::Channel
 end
 function compute_chan(channel::Channel)
-    verbosity[] > 1 && println("starting computation")
+    verbosity() > 1 && println("starting computation")
     c = Computation()
     while !isfinished(c)
         run!(c)
@@ -173,12 +174,12 @@ function run!(c::Computation)
     c.status = 1
     global running
     running = true
+    (verbosity() > 1) && println("calculating...")
     printinfo("calculating...")
-    (verbosity[] > 1) && println("calculating...")
     PSA.driver!(ps_data,guiopts,gs,myprintln=printinfo)
     setedittext(ps_data.zoom_list[ps_data.zoom_pos])
     running = false
-    (verbosity[] > 1) && println("calculation done.")
+    (verbosity() > 1) && println("calculation done.")
     printinfo("done.")
     c.status = 3
 end
@@ -292,8 +293,29 @@ on(o_arpack_nev) do s
     end
 end
 
+on(o_arpack_ncv) do s
+    global need_recomp
+    ps_dict = ps_data.ps_dict
+    if haskey(ps_dict,:arpack_opts)
+        n = tryparse(Int, s)
+        if n === nothing
+            @warn "Invalid entry for ARPACK ncv"
+            return
+        end
+        if (n < 1) || (n > size(ps_data.input_matrix,1)-2)
+            @warn "Invalid entry for ARPACK ncv"
+        end
+        if ps_dict[:arpack_opts].ncv != n
+            ps_dict[:arpack_opts].ncv = n
+            ps_dict[:proj_valid] = false
+            need_recomp = true
+            @emit enableGo(Int32(1))
+        end
+    end
+end
+
 on(o_arpack_which) do s
-    (verbosity[] > 1) && println("attempting to set which to $s")
+    (verbosity() > 1) && println("attempting to set which to $s")
     global need_recomp
     ps_dict = ps_data.ps_dict
     if s ∈ ["LM", "SM", "LR", "SR", "LI", "SI"]
@@ -576,7 +598,7 @@ function loadmtx(varname::AbstractString,myexpr::AbstractString)
         Core.eval(PSAData, Meta.parse("$(varname) = $(myexpr)"))
         Core.eval(PseudospectraQML.PSApp,
              Meta.parse("ps_data = Pseudospectra.new_matrix(PSAData.$(varname),guiopts)"))
-        (verbosity[] > 1) && println("Matrix has been digested.")
+        (verbosity() > 1) && println("Matrix has been digested.")
     catch JE
         printwarning("New Matrix failed. See console.")
         @warn "loadmtx failed, exception was $JE"
@@ -588,7 +610,7 @@ function loadmtx(varname::AbstractString,myexpr::AbstractString)
     guiopts = PSA.fillopts(gs,PSAData.getopts())
     refresh()
     firstcall = false
-    (verbosity[] > 1) && println("matrix loaded")
+    (verbosity() > 1) && println("matrix loaded")
     nothing
 end
 
@@ -682,7 +704,7 @@ function zmoused(leftright::Int32, xpxl::Float64, ypxl::Float64, yref::Float64)
         printwarning("zooming or point selection not implemented for $(typeof(Plots.backend()))")
         return nothing
     end
-    (verbosity[] > 1) && println("selected $xy from yvals $yref $ypxl")
+    (verbosity() > 1) && println("selected $xy from yvals $yref $ypxl")
     z = xy[1]+1im*xy[2]
     if true
         zooming_in = (leftright == 0)
@@ -1016,11 +1038,11 @@ gs = PlotsGUIState(nothing,0,drawcmd)
 # we are not inchoate.
 
 if !isempty(PSAData.getdefaultmtx())
-    (verbosity[] > 0) && println("Using existing matrix from PSAData")
+    (verbosity() > 0) && println("Using existing matrix from PSAData")
     # guiopts is empty until now
     merge!(guiopts,PSA.fillopts(gs,PSAData.opts))
     ps_data = PSA.new_matrix(PSAData.getdefaultmtx(),guiopts)
-    (verbosity[] > 1) && println("Matrix has been digested.")
+    (verbosity() > 1) && println("Matrix has been digested.")
     # forget opts that should not apply to newly ingested data
     # viz. when new_matrix() is invoked from GUI.
     PSAData.clearopts(false)

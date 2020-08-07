@@ -334,16 +334,6 @@ ApplicationWindow {
 		}
 	    }
 	    MenuItem {
-		id: arpackNcv
-		text: "\&NCV"
-		onTriggered: {
-		    setParamDlgText.text = "Set No. Krylov vecs for ARPACK/Eigs";
-		    setParamDlg.curparam = "ArpackNcv";
-		    paramDlgParam.text = root.arpNcv;
-		    setParamDlg.visible = true;
-		}
-	    }
-	    MenuItem {
 		id: arpackTol
 		text: "\&Tol"
 		onTriggered: {
@@ -719,6 +709,64 @@ ApplicationWindow {
 			}
 		    }
 		}
+
+		GroupBox {
+		    Layout.alignment: Qt.AlignTop
+		    title: "Contour Levels:"
+		    ColumnLayout{
+			Button {
+			    Layout.alignment: Qt.AlignCenter
+			    text: "Smart Levels"
+			    onClicked: Julia.smartlevels()
+			}
+			RowLayout {
+			    Layout.alignment: Qt.AlignCenter
+			    Text {
+				text: "log10(max): "
+			    }
+			    TextField {
+				id: ctrMax
+				Layout.alignment: Qt.AlignCenter
+				Layout.minimumWidth: 20
+				Layout.preferredWidth: 60
+				placeholderText: qsTr("0")
+				validator: DoubleValidator{}
+				onEditingFinished: observables.lastlev = ctrMax.text
+			    }
+			}
+			RowLayout {
+			    Layout.alignment: Qt.AlignCenter
+			    Text {
+				text: "log10(min): "
+			    }
+			    TextField {
+				id: ctrMin
+				Layout.alignment: Qt.AlignCenter
+				Layout.minimumWidth: 20
+				Layout.preferredWidth: 60
+				placeholderText: qsTr("0")
+				validator: DoubleValidator {}
+				onEditingFinished: observables.firstlev = ctrMin.text
+			    }
+			}
+			RowLayout {
+			    Layout.alignment: Qt.AlignCenter
+			    Text {
+				text: "Step size: "
+			    }
+			    TextField {
+				id: ctrStep
+				Layout.alignment: Qt.AlignCenter
+				Layout.minimumWidth: 20
+				Layout.preferredWidth: 60
+				placeholderText: qsTr("0")
+				validator: DoubleValidator {}
+				onEditingFinished: observables.levstep = ctrStep.text
+			    }
+			}
+		    }
+		} /* contour level group box */
+
             }
 
 	    StackLayout {
@@ -844,9 +892,16 @@ ApplicationWindow {
 			exclusiveGroup: dirvsiter
 			onClicked: Julia.use_eigs(1)
 		    }
+		}
+            }
+
+	    GroupBox {
+		title: "ARPACK Parameters:"
+		Layout.alignment: Qt.AlignTop
+		ColumnLayout{
 		    RowLayout {
 			Text {
-			    text: "No. eigs: "
+			    text: "No. eigvals: "
 			}
 			TextField {
 			    id: kArpack
@@ -856,6 +911,20 @@ ApplicationWindow {
 			    placeholderText: qsTr("6")
 			    inputMethodHints: Qt.ImhDigitsOnly
 			    onEditingFinished: observables.arpack_nev = kArpack.text
+			}
+		    }
+		    RowLayout {
+			Text {
+			    text: "No. Krylov vecs: "
+			}
+			TextField {
+			    id: arpackNcv
+			    enabled: eigsBtn.checked
+			    Layout.alignment: Qt.AlignCenter
+			    Layout.preferredWidth: 40
+			    placeholderText: qsTr("6")
+			    inputMethodHints: Qt.ImhDigitsOnly
+			    onEditingFinished: observables.arpack_ncv = arpackNcv.text
 			}
 		    }
 		    ComboBox {
@@ -904,65 +973,7 @@ ApplicationWindow {
 			}
 		    }
 		}
-            }
-
-            GroupBox {
-		Layout.alignment: Qt.AlignTop
-		title: "Contour Levels:"
-		ColumnLayout{
-		    Button {
-			Layout.alignment: Qt.AlignCenter
-			text: "Smart Levels"
-			onClicked: Julia.smartlevels()
-		    }
-		    RowLayout {
-			Layout.alignment: Qt.AlignCenter
-			Text {
-			    text: "log10(max): "
-			}
-			TextField {
-			    id: ctrMax
-			    Layout.alignment: Qt.AlignCenter
-			    Layout.minimumWidth: 20
-			    Layout.preferredWidth: 60
-			    placeholderText: qsTr("0")
-			    validator: DoubleValidator{}
-			    onEditingFinished: observables.lastlev = ctrMax.text
-			}
-		    }
-		    RowLayout {
-			Layout.alignment: Qt.AlignCenter
-			Text {
-			    text: "log10(min): "
-			}
-			TextField {
-			    id: ctrMin
-			    Layout.alignment: Qt.AlignCenter
-			    Layout.minimumWidth: 20
-			    Layout.preferredWidth: 60
-			    placeholderText: qsTr("0")
-			    validator: DoubleValidator {}
-			    onEditingFinished: observables.firstlev = ctrMin.text
-			}
-		    }
-		    RowLayout {
-			Layout.alignment: Qt.AlignCenter
-			Text {
-			    text: "Step size: "
-			}
-			TextField {
-			    id: ctrStep
-			    Layout.alignment: Qt.AlignCenter
-			    Layout.minimumWidth: 20
-			    Layout.preferredWidth: 60
-			    placeholderText: qsTr("0")
-			    validator: DoubleValidator {}
-			    onEditingFinished: observables.levstep = ctrStep.text
-			}
-		    }
-		}
-            } /* contour level group box */
-
+	    }
 	} /* main bottom row */
 	Rectangle {
             color: "black"
