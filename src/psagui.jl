@@ -1,25 +1,39 @@
 module PSApp
 
 # WARNING: some comments are obsolete!
-# This is an incomplete refactor of a 3-year old code, a Julian dinosaur.
+# Even worse, some control flow is probably obsolete too.
 
+# needed for use of JuliaPaintedItem
 ENV["QSG_RENDER_LOOP"] = "basic"
 
 using QML
 using Observables
 
-using ..PseudospectraQML: _verbosity
+using ..PseudospectraQML: _verbosity, _pbackend
 verbosity() = _verbosity[]
 
+# the App will store return values here:
 const results = Dict{Symbol,Any}()
 
-# Python must not manage a gui:
-ENV["MPLBACKEND"] = "Agg"
+# which entry in QML stacks to use for graphs
+live_pane() = _pbackend[] == :pyplot ? 2 : 1
+
 using Plots
 
+using CxxWrap
+
 # Other backends are not yet really functional, so try to force this for now.
-if get(ENV,"PSA_MPL","1") != "0"
+if _pbackend[] == :pyplot
+    # Python must not manage a gui
+    ENV["MPLBACKEND"] = "Agg"
     pyplot()
+else
+    # Experimental!
+    @warn "GR backend is experimental!"
+    ENV["GKSwstype"] = "use_default"
+    ENV["GKS_WSTYPE"] = 381
+    ENV["GKS_QT_VERSION"] = 5
+    gr(show=false)
 end
 
 (verbosity() > 1) && println("Plots loaded, backend is $(typeof(Plots.backend())).")
@@ -30,6 +44,9 @@ PSA = Pseudospectra
 
 PseudospectraPlots = Pseudospectra.PseudospectraPlots
 PlotsGUIState = Pseudospectra.PseudospectraPlots.PlotsGUIState
+function drawcmd end # forward decl
+const gs = PlotsGUIState(nothing,0,drawcmd)
+
 
 using PseudospectraQML
 
@@ -69,6 +86,9 @@ dvi = dvi_unset
 
 const timer = QTimer()
 
+const cpaint = Channel{Int}(1)
+const mcounter = Ref(0)
+
 # flags indicating whether items changed by GUI require action
 need_recomp = false
 need_redraw = false
@@ -76,7 +96,7 @@ need_redraw = false
 # In order to force updates of the GUI window, we use tasks
 # and a QTimer. For now we use produce/consume logic.
 compute_chnl = nothing
-running = false
+const running = Ref(false)
 
 const axname2idx = Dict(:xMin=>1,:xMax=>2,:yMin=>3,:yMax=>4)
 
@@ -107,9 +127,10 @@ const o_fov = Observable(Cint(0))
 const o_imaxis = Observable(Cint(0))
 const o_unitcircle = Observable(Cint(0))
 const o_arpack_nev = Observable("6")
-const o_arpack_ncv = Observable("6")
+const o_arpack_ncv = Observable("8")
 const o_arpack_which = Observable("LM")
 const o_ticks = Observable(Cint(0)) # Number of times the timer has ticked
+const o_surf_ok = Observable(_pbackend[] == :pyplot ? Cint(1) : Cint(0))
 
 propmap = JuliaPropertyMap(
     "computationkey" => computation_key,
@@ -130,6 +151,7 @@ propmap = JuliaPropertyMap(
     "arpack_nev" => o_arpack_nev,
     "arpack_ncv" => o_arpack_ncv,
     "arpack_which" => o_arpack_which,
+    "surface_ok" => o_surf_ok,
 )
 
 mutable struct Computation
@@ -159,26 +181,33 @@ end
 
 const pvals = [0.0, 0.5, 0.99, 1.0, -1.0]
 function step(c::ChannelComputation)
-    s = take!(c.channel)
-    o_progress[] = pvals[s]
-    if s >= 3
-        @emit stopTimer()
-    end
+    # DEBUG: if we don't block on c.channel, everything waits in limbo
+    # if isready(c.channel)
+        s = take!(c.channel)
+        verbosity() > 1 && println("step got $s")
+        o_progress[] = pvals[s]
+        if s >= 3
+            @emit stopTimer()
+        end
+    # end
 end
 
 on(o_ticks) do t
     step(computation[])
+    if !isready(cpaint)
+        verbosity() > 1 && println("ticker puts to cpaint")
+        put!(cpaint, -1)
+    end
 end
 
 function run!(c::Computation)
     c.status = 1
-    global running
-    running = true
+    running[] = true
     (verbosity() > 1) && println("calculating...")
     printinfo("calculating...")
     PSA.driver!(ps_data,guiopts,gs,myprintln=printinfo)
     setedittext(ps_data.zoom_list[ps_data.zoom_pos])
-    running = false
+    running[] = false
     (verbosity() > 1) && println("calculation done.")
     printinfo("done.")
     c.status = 3
@@ -395,6 +424,18 @@ function init_backend(width::Float64, height::Float64, idx)
     return
 end
 
+# This is supposed to help with z-picking. It doesn't, yet.
+function set_paint_size(width::Float64, height::Float64, idx)
+    if width < 5 || height < 5
+        return
+    end
+    if idx == 1
+        mainsize .= round.(Int,[width,height])
+    else
+        othersize .= round.(Int,[width,height])
+    end
+end
+
 function mainplot(d::JuliaDisplay)
     global maindisplay
     maindisplay = d
@@ -416,6 +457,7 @@ end
 qmlfunction("mainplot", mainplot)
 qmlfunction("init_backend", init_backend)
 qmlfunction("otherplot", otherplot)
+qmlfunction("size_paint", set_paint_size)
 
 # Functions called by various GUI controls
 
@@ -541,7 +583,7 @@ function go()
         @warn "go invoked before population"
         return
     end
-    @emit showPlot(Int32(1))
+    @emit showPlot(Int32(0), Int32(live_pane()))
     if need_recomp
         println("opening channel for computation task")
         setup_computation(0)
@@ -550,7 +592,7 @@ function go()
         need_redraw = false
     elseif need_redraw
         printinfo("redrawing")
-        PseudospectraPlots.redrawcontour(gs,ps_data,guiopts)
+        Pseudospectra.redrawcontour(gs,ps_data,guiopts)
         need_redraw = false
     end
 #    ax = (mainpltobj != nothing) ? PSA.getxylims(mainpltobj) : zeros(0)
@@ -581,8 +623,8 @@ function loadmtx(varname::AbstractString,myexpr::AbstractString)
     global mainplotobj, plotobj2
     mainplotobj = nothing
     plotobj2 = nothing
-    @emit showPlot(Int32(0))
-    @emit showPlot2(Int32(0))
+    @emit showPlot(Int32(0), Int32(0))
+    @emit showPlot(Int32(1), Int32(0))
 
     # this should really be done by the GUI, but this is easier:
     if isempty(varname)
@@ -790,7 +832,7 @@ function ploteigv()
     else
         # TODO: wrap in gui stupefy/waken
         PSA.modeplot(ps_data, 0; gs=gs, zgetter=getguiz)
-        @emit showPlot2(Int32(1))
+        @emit showPlot(Int32(1), Int32(live_pane()))
     end
 end
 function plotpmode()
@@ -799,7 +841,7 @@ function plotpmode()
     else
         # TODO: wrap in gui stupefy/waken
         PSA.modeplot(ps_data, 1; gs=gs, zgetter=getguiz)
-        @emit showPlot2(Int32(1))
+        @emit showPlot(Int32(1), Int32(live_pane()))
     end
 end
 
@@ -818,7 +860,7 @@ function mtxpwrcb(nmax)
         printwarning("Matrix power comp/plot failed. See console.")
         rethrow(JE)
     else
-        @emit showPlot2(Int32(1))
+        @emit showPlot(Int32(1), Int32(live_pane()))
     end
 end
 
@@ -834,13 +876,13 @@ function mtxexpcb(dt,nmax)
         printwarning("Matrix exp comp/plot failed. See console.")
         rethrow(JE)
     else
-        @emit showPlot2(Int32(1))
+        @emit showPlot(Int32(1), Int32(live_pane()))
     end
 end
 
 function plotps3d()
     PSA.surfplot(gs, ps_data, guiopts)
-    @emit showPlot2(Int32(1))
+    @emit showPlot(Int32(1), Int32(live_pane()))
 end
 
 qmlfunction("ploteigv", ploteigv)
@@ -850,6 +892,54 @@ qmlfunction("mtxexpcb", mtxexpcb)
 qmlfunction("plotps3d", plotps3d)
 qmlfunction("smartlevels", smartlevels)
 
+# these will be wrapped below
+function paint_main(p::CxxPtr{QPainter}, item::CxxPtr{JuliaPaintedItem})
+    (_pbackend[] == :gr) || return
+    ENV["GKS_CONID"] = split(repr(p.cpp_object), "@")[2]
+    dev = device(p[])[]
+    r = effectiveDevicePixelRatio(window(item[])[])
+    w, h = width(dev) / r, height(dev) / r
+    if running[]
+        c = mcounter[] + 1
+        mcounter[] = c
+        if !isready(cpaint)
+            verbosity() > 1 && println("painter puts to cpaint")
+            put!(cpaint, c)
+        end
+        # @emit stopTimer()
+    end
+    if (gs.mainph === nothing)
+        (verbosity() > 1) && println("null paint_main called")
+        return
+    end
+    (verbosity() > 2) && println("paint_main called")
+    if mainsize[1] > 0
+        plot!(gs.mainph, size=(w,h)) # Tuple(mainsize))
+        display(gs.mainph)
+    end
+    return
+end
+function paint_second(p::CxxPtr{QPainter}, item::CxxPtr{JuliaPaintedItem})
+    (_pbackend[] == :gr) || return
+    ENV["GKS_CONID"] = split(repr(p.cpp_object), "@")[2]
+    dev = device(p[])[]
+    r = effectiveDevicePixelRatio(window(item[])[])
+    w, h = width(dev) / r, height(dev) / r
+    println("got w,h,r: $w $h $r")
+    if (gs.ph2 === nothing)
+        (verbosity() > 1) && println("null paint_second called")
+        return
+    end
+    (verbosity() > 1) && println("paint_second called")
+    if othersize[1] > 0
+        plot!(gs.ph2, size=Tuple(w,h))
+        #@warn "suppressing display"
+        px = plot(gs.ph2[1],layout=(1,1))
+        display(px)
+    end
+    return
+end
+
 ################################################################
 # functions to be invoked from Julialand
 
@@ -858,20 +948,50 @@ function drawcmd(gs::PlotsGUIState,ph,id)
     global mainpltobj
     global pltobj2
     if id == 1
-        mainpltobj = ph
-        if maindisplay != nothing
-            display(maindisplay, ph)
-        end
-        if running
-            #println("drawcmd called while running")
+        if _pbackend[] == :pyplot
+            mainpltobj = ph
+            if maindisplay != nothing
+                display(maindisplay, ph)
+            end
+        else
+            if running[]
             #myproduce(compute_chnl,1)
-            sleep(0.01)
+            #sleep(0.1)
             #myproduce(compute_chnl,1)
+
+                if isready(cpaint)
+                    verbosity() > 1 && println("clearing cpaint")
+                    take!(cpaint)
+                end
+
+                # presumably if we get here we really want this
+                # (but not currently working because of Qt type error)
+                # @emit repaintMainPlot()
+                # @emit stopTimer()
+                @emit updateMainPlot()
+                # if timer has default interval of 0, it should just
+                # run until event queue is cleared.
+                # @emit startTimer()
+                sleep(0.05)
+                verbosity() > 1 && println("hoping for repaint")
+                if isready(cpaint)
+                    x = take!(cpaint)
+                    verbosity() > 1 && println("monitor produced $x")
+                end
+#                @emit startTimer()
+            else
+                @emit updateMainPlot()
+            end
         end
     else
-        pltobj2 = ph
-        if otherdisplay != nothing
-            display(otherdisplay, ph)
+        if _pbackend[] == :pyplot
+            pltobj2 = ph
+            if otherdisplay != nothing
+                display(otherdisplay, ph)
+            end
+        else
+            gs.ph2 = ph
+            @emit updatePlot2()
         end
     end
 end
@@ -996,7 +1116,7 @@ function refresh()
             else
                 PSA.driver!(ps_data,guiopts,gs)
             end
-            @emit showPlot(Int32(1))
+            @emit showPlot(Int32(0), Int32(live_pane()))
             @emit enableGo(Int32(0))
         end
     else # iterative
@@ -1012,7 +1132,7 @@ function refresh()
         #=
         if haskey(guiopts,:arpack_opts)
             # FIXME: couldn't clear, so may get junk while starting up
-            @emit showPlot(Int32(1))
+            @emit showPlot(Int32(0), Int32(1))
             PSA.driver!(ps_data,guiopts,gs)
             @emit enableGo(Int32(0))
         else
@@ -1032,8 +1152,6 @@ end
 # This is the main App execution sequence.
 # QML seems to require that key data structures be in global scope.
 
-gs = PlotsGUIState(nothing,0,drawcmd)
-
 # Load up and check data first so if PSA throws an exception
 # we are not inchoate.
 
@@ -1052,7 +1170,12 @@ end
 
 qml_file = joinpath(dirname(@__FILE__), "psagui.qml")
 
-load(qml_file, timer=timer, observables=propmap)
+load(qml_file, timer=timer, observables=propmap,
+     paint_main_wrapped = @safe_cfunction(paint_main, Cvoid,
+                                          (CxxPtr{QPainter}, CxxPtr{JuliaPaintedItem})),
+     paint_second_wrapped = @safe_cfunction(paint_second, Cvoid,
+                                          (CxxPtr{QPainter}, CxxPtr{JuliaPaintedItem}))
+     )
 
 if !isempty(PSAData.getdefaultmtx())
     refresh()

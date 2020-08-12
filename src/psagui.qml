@@ -3,7 +3,7 @@ import QtQuick 2.0
 import QtQuick.Controls 1.0
 import QtQuick.Layouts 1.3
 import QtQuick.Dialogs 1.2
-import org.julialang 1.0
+import org.julialang 1.1
 
 /*
  * WARNING: some comments are obsolete!
@@ -35,7 +35,9 @@ ApplicationWindow {
     // Set up timer connection
     Connections {
 	target: timer
-	function onTimeout() { observables.ticks += 1; }
+	function onTimeout() {
+	    observables.ticks += 1;
+	}
     }
 
     // diaglog box for setting a parameter
@@ -367,7 +369,6 @@ ApplicationWindow {
 	anchors.fill: parent
 	/* Layout.fillHeight: true */
 	property string arpMaxiter
-	property string arpNcv
 	property string arpWhichIdx
 	property string arpTol
 
@@ -384,6 +385,12 @@ ApplicationWindow {
 		return;
             Julia.init_backend(jdisp.width, jdisp.height, 1);
             do_plot();
+	}
+	function size_jpaint()
+	{
+	    if(jpaint === null)
+		return;
+	    Julia.size_paint(jpaint.width, jpaint.height, 1);
 	}
 
 	function do_plot2()
@@ -402,6 +409,13 @@ ApplicationWindow {
             Julia.init_backend(jdisp2.width, jdisp2.height, 2);
             do_plot2();
 	}
+	function size_jpaint2()
+	{
+	    if(jpaint2 === null)
+		return;
+	    Julia.size_paint(jpaint2.width, jpaint2.height, 2);
+	}
+
 
 	JuliaSignals {
 	    /*
@@ -456,15 +470,26 @@ ApplicationWindow {
 		eigsBtn.checked = (x == 0);
 	    }
 
-	    signal showPlot(var flag) // int
+	    signal showPlot(var iplot, var flag) // int
 	    onShowPlot: {
-		jdispstack.currentIndex = flag;
+		if (iplot == 0)
+		    jdispstack.currentIndex = flag;
+		else
+		    jdisp2stack.currentIndex = flag;
 	    }
 
-	    signal showPlot2(var flag) // int
-	    onShowPlot2: {
-		jdisp2stack.currentIndex = flag;
-	    }
+	    signal updateMainPlot()
+	    onUpdateMainPlot: jpaint.update()
+
+	    /*
+	     * This causes a type error
+	      signal repaintMainPlot()
+	      onRepaintMainPlot: jpaint.repaint()
+	    */
+
+	    signal updatePlot2()
+	    onUpdatePlot2: jpaint2.update()
+
 /*
 	    signal clearPlot(int idnum)
 	    onClearPlot: {
@@ -501,7 +526,7 @@ ApplicationWindow {
 	    onSetArpackOpts: {
 		root.arpMaxiter = maxiter.toString();
 		kArpack.text = nev.toString();
-		root.arpNcv = ncv.toString();
+		arpackNcv.text = ncv.toString();
 		root.arpTol = tol.toString();
 		whichArpackBox.currentIndex = whichidx;
 	    }
@@ -531,8 +556,8 @@ ApplicationWindow {
 
 	    signal runTimer(var x) // int
 	    onRunTimer: {
-		if (x > 0) {
-		    timer.interval = 10;
+		if (x >= 0) {
+		    timer.interval = x;
 		    timer.start();
 		}
 		else
@@ -599,6 +624,28 @@ ApplicationWindow {
 		    implicitHeight: 380
 		}
 
+		JuliaPaintedItem {
+		    id: jpaint
+		    implicitWidth: 400
+		    implicitHeight: 380
+		    Layout.fillWidth: true
+		    Layout.fillHeight: true
+		    onHeightChanged: root.size_jpaint()
+		    onWidthChanged: root.size_jpaint()
+		    paintFunction: paint_main_wrapped
+		    MouseArea {
+			id: jpaintmousev
+			anchors.fill:parent
+			acceptedButtons: Qt.LeftButton | Qt.RightButton
+			onClicked: {
+			    if (mouse.button == Qt.LeftButton)
+				Julia.zmoused(0, mouse.x, mouse.y, jpaint.height);
+			    else
+				Julia.zmoused(1, mouse.x, mouse.y, jpaint.height);
+			}
+		    }
+		}
+
 		JuliaDisplay {
 		    id: jdisp
 		    implicitWidth: 400
@@ -618,6 +665,7 @@ ApplicationWindow {
 			}
 		    }
 		}
+
 	    }
 
             ColumnLayout {
@@ -677,8 +725,10 @@ ApplicationWindow {
 			    onClicked: Julia.plotpmode()
 			}
 			Button {
+			    id: surfaceButton
 			    Layout.alignment: Qt.AlignCenter
 			    text: "3D Plot"
+			    visible: observables.surface_ok
 			    onClicked: Julia.plotps3d()
 			}
 			/*
@@ -778,6 +828,17 @@ ApplicationWindow {
 		Rectangle {
 		    implicitWidth: 400
 		    implicitHeight: 380
+		}
+
+		JuliaPaintedItem {
+		    id: jpaint2
+		    implicitWidth: 400
+		    implicitHeight: 380
+		    Layout.fillWidth: true
+		    Layout.fillHeight: true
+		    onHeightChanged: root.size_jpaint2()
+		    onWidthChanged: root.size_jpaint2()
+		    paintFunction: paint_second_wrapped
 		}
 
 		JuliaDisplay {
@@ -922,7 +983,7 @@ ApplicationWindow {
 			    enabled: eigsBtn.checked
 			    Layout.alignment: Qt.AlignCenter
 			    Layout.preferredWidth: 40
-			    placeholderText: qsTr("6")
+			    placeholderText: qsTr("0")
 			    inputMethodHints: Qt.ImhDigitsOnly
 			    onEditingFinished: observables.arpack_ncv = arpackNcv.text
 			}
