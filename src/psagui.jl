@@ -3,6 +3,12 @@ module PSApp
 # WARNING: some comments are obsolete!
 # Even worse, some control flow is probably obsolete too.
 
+function cprint(s::String)
+    n = length(s)+1
+    fid = 2
+    ccall(:write,Clong,(Cint,Cstring,Clong),fid,s,n)
+end
+
 # needed for use of JuliaPaintedItem
 ENV["QSG_RENDER_LOOP"] = "basic"
 
@@ -29,7 +35,7 @@ if _pbackend[] == :pyplot
     pyplot()
 else
     # Experimental!
-    @warn "GR backend is experimental!"
+    # @warn "GR backend is experimental!"
     ENV["GKSwstype"] = "use_default"
     ENV["GKS_WSTYPE"] = 381
     ENV["GKS_QT_VERSION"] = 5
@@ -154,10 +160,10 @@ propmap = JuliaPropertyMap(
     "surface_ok" => o_surf_ok,
 )
 
-mutable struct Computation
+mutable struct Monitor
     status::Int # 0:initialized 1:running 2:interrupted 3:done 4:error
     key::Int32
-    function Computation()
+    function Monitor()
         me = new(0,computation_key[])
         on(computation_key) do key
             me.key = key
@@ -166,41 +172,63 @@ mutable struct Computation
         return me
     end
 end
-isfinished(c::Computation) = c.status >= 3
-struct ChannelComputation
+isfinished(c::Monitor) = c.status >= 3
+struct Runner
     channel::Channel
+    ready::Bool
 end
 function compute_chan(channel::Channel)
     verbosity() > 1 && println("starting computation")
-    c = Computation()
+    c = Monitor()
     while !isfinished(c)
         run!(c)
+        if isready(channel)
+            cprint("blocking in cc\n")
+        end
+        cprint("putting $(c.status) in cc\n")
         put!(channel, c.status)
+        cprint("continuing in cc\n")
+        # if c.status == 3
+        #    QML.stop(timer)
+        # end
     end
+    cprint("cc done\n")
+    put!(channel, 4)
+    cprint("cc exiting\n")
+    nothing
 end
 
 const pvals = [0.0, 0.5, 0.99, 1.0, -1.0]
-function step(c::ChannelComputation)
-    # DEBUG: if we don't block on c.channel, everything waits in limbo
-    # if isready(c.channel)
-        s = take!(c.channel)
-        verbosity() > 1 && println("step got $s")
-        o_progress[] = pvals[s]
-        if s >= 3
-            @emit stopTimer()
-        end
-    # end
+function step(r::Runner)
+    # failed attempt to avoid deadlock by letting another tick go by
+  # if isopen(r.channel)
+    # NOTE: if we don't block on r.channel, everything waits in limbo
+    if !isready(r.channel)
+        cprint("blocking in step\n")
+    end
+    s = take!(r.channel)
+    cprint("taking $s in step\n")
+    verbosity() > 1 && println("step got $s")
+#    if s == 3
+#        QML.stop(timer)
+#    end
+    o_progress[] = pvals[s]
+    @emit updateMainPlot()
+  # end
 end
 
 on(o_ticks) do t
-    step(computation[])
-    if !isready(cpaint)
-        verbosity() > 1 && println("ticker puts to cpaint")
-        put!(cpaint, -1)
+    cprint("tick\n")
+    if t > 0
+        step(computation[])
     end
+#    if !isready(cpaint)
+#        verbosity() > 1 && println("ticker puts to cpaint")
+#        put!(cpaint, -1)
+#    end
 end
 
-function run!(c::Computation)
+function run!(c::Monitor)
     c.status = 1
     running[] = true
     (verbosity() > 1) && println("calculating...")
@@ -215,8 +243,18 @@ end
 
 function setup_computation(key)
     computation_key[] = key
-    computation[] = ChannelComputation(Channel(compute_chan))
     o_progress[] = 0.0
+    computation[] = Runner(Channel(compute_chan), false)
+end
+
+on(o_progress) do p
+    if p >= 1
+        # this acts as finalizer for Runner
+        println("ticks: ", o_ticks[])
+        QML.stop(timer)
+        o_ticks[] = Cint(0)
+        computation[] = nothing
+    end
 end
 
 on(o_gridpts) do s
@@ -585,13 +623,14 @@ function go()
     end
     @emit showPlot(Int32(0), Int32(live_pane()))
     if need_recomp
-        println("opening channel for computation task")
+        (verbosity() > 1) && println("opening channel for computation task")
+        @emit startTimer(Int32(10))
         setup_computation(0)
-        @emit startTimer()
         need_recomp = false
         need_redraw = false
     elseif need_redraw
         printinfo("redrawing")
+        (verbosity() > 1) && println("redrawing")
         Pseudospectra.redrawcontour(gs,ps_data,guiopts)
         need_redraw = false
     end
@@ -902,10 +941,10 @@ function paint_main(p::CxxPtr{QPainter}, item::CxxPtr{JuliaPaintedItem})
     if running[]
         c = mcounter[] + 1
         mcounter[] = c
-        if !isready(cpaint)
-            verbosity() > 1 && println("painter puts to cpaint")
-            put!(cpaint, c)
-        end
+#        if !isready(cpaint)
+#            verbosity() > 1 && println("painter puts to cpaint")
+#            put!(cpaint, c)
+#       end
         # @emit stopTimer()
     end
     if (gs.mainph === nothing)
@@ -925,14 +964,13 @@ function paint_second(p::CxxPtr{QPainter}, item::CxxPtr{JuliaPaintedItem})
     dev = device(p[])[]
     r = effectiveDevicePixelRatio(window(item[])[])
     w, h = width(dev) / r, height(dev) / r
-    println("got w,h,r: $w $h $r")
     if (gs.ph2 === nothing)
         (verbosity() > 1) && println("null paint_second called")
         return
     end
     (verbosity() > 1) && println("paint_second called")
     if othersize[1] > 0
-        plot!(gs.ph2, size=Tuple(w,h))
+        plot!(gs.ph2, size=(w,h))
         #@warn "suppressing display"
         px = plot(gs.ph2[1],layout=(1,1))
         display(px)
@@ -955,30 +993,17 @@ function drawcmd(gs::PlotsGUIState,ph,id)
             end
         else
             if running[]
-            #myproduce(compute_chnl,1)
-            #sleep(0.1)
-            #myproduce(compute_chnl,1)
-
-                if isready(cpaint)
-                    verbosity() > 1 && println("clearing cpaint")
-                    take!(cpaint)
+                if computation[] === nothing
+                    cprint("? running w/o computation\n")
+                    # @emit dieDieDie()
+                else
+                    if isready(computation[].channel)
+                        cprint("blocking in drawcmd\n")
+                    end
+                    cprint("putting 2 in drawcmd\n")
+                    put!(computation[].channel, 2)
+                    cprint("continuing in drawcmd\n")
                 end
-
-                # presumably if we get here we really want this
-                # (but not currently working because of Qt type error)
-                # @emit repaintMainPlot()
-                # @emit stopTimer()
-                @emit updateMainPlot()
-                # if timer has default interval of 0, it should just
-                # run until event queue is cleared.
-                # @emit startTimer()
-                sleep(0.05)
-                verbosity() > 1 && println("hoping for repaint")
-                if isready(cpaint)
-                    x = take!(cpaint)
-                    verbosity() > 1 && println("monitor produced $x")
-                end
-#                @emit startTimer()
             else
                 @emit updateMainPlot()
             end
@@ -1182,6 +1207,7 @@ if !isempty(PSAData.getdefaultmtx())
 end
 
 function runme()
+    @emit setInterval(Cint(100))
     # Run the application
     QML.exec()
     return results

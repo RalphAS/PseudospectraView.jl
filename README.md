@@ -14,30 +14,34 @@
 -->
 
 # Introduction
+
 PseudospectraQML is a Julia/Qt GUI for analyzing nonsymmetric matrices by
 displaying eigenvalues and pseudospectra, along with related properties.
 It is largely based on the famous
 [EigTool](http://www.cs.ox.ac.uk/pseudospectra/eigtool/) from Oxford.
-It uses computational routines from
+
+It uses core computational routines from a separate package,
 [Pseudospectra.jl](https://github.com/RalphAS/Pseudospectra.jl).
+
 
 # Warning
 
 This package is experimental and may misbehave (i.e., some remaining
 bugs may deadlock or crash a Julia session), so save any valuable
 results before running the app.  It is quite complicated and has some
-tricky dependencies, so it takes a while to load and may have control
-flow bugs. That said, most of the basic functionality is there.
-So interested users are encouraged to try it out and report problems:
+tricky dependencies, so it takes a while to load. (Also, see "Known issues"
+below.) That said, most of the basic functionality works.
+Interested users are encouraged to try it out and report problems:
 please provide details of how to reproduce the latter.
 
-# Installation
+# Installation and direct dependencies
 
-The current version of this package requires Plots.jl with the PyPlot backend.
+The graphical user interface is based on [QML.jl](https://github.com/barche/QML.jl).
+Install that and make sure it works first.
 
-The graphical user interface is based on
-[QML.jl](https://github.com/barche/QML.jl). Install that and make sure it
-works first.
+The current version of this package requires Plots.jl. The PyPlot
+backend for Plots is supported; support for the GR backend is work
+in progress.
 
 Install [Pseudospectra.jl](https://github.com/RalphAS/Pseudospectra.jl); this
 must be done manually, pending registration.
@@ -68,14 +72,16 @@ iterative scheme in ARPACK to compute pseudospectra for a reduced
 form, then press `Update` for computation and display.
 
 The default mesh is very coarse; adjust the grid size and axis limits to
-taste and press the "Update" button to recompute.
+taste and press the `Update` button to recompute.
 
 One can zoom in by clicking the left mouse button with the pointer in the
 main plot area. (Zoom out with the right button.) Note that this usually
-involves recomputation.
+involves recomputation. ("Left" and "right" here refer to default button
+assigments.)
 
-To display an eigenmode or pseudo-eigenmode, use the "Select z" button to
-specify the value, then the appropriate mode button.
+To display an eigenmode or pseudo-eigenmode, click the `Select z` button
+which brings up a dialog to specify the value, then click
+the appropriate mode button.
 
 ## TODO: walk-throughs with screenshots needed here
 
@@ -94,6 +100,7 @@ saved_vars = psagui(A)
 # run the app, then close the window
 
 using Plots
+gr() # or some other backend - see below
 baz = saved_vars[:baz]
 contour(baz.x,baz.y,baz.Z)
 png("baz")
@@ -105,31 +112,33 @@ png("baz")
 * The "pause/resume/stop" logic is not implemented.
 
 # Other notable peculiarities
-* At present, there is a use dichotomy: in a given session, one may
-  use **either** a direct interface to Pseudospectra.jl with interactive
-  graphics **or** the GUI. (This is because the plotter must use a
-  non-interactive backend to prepare images for QML, and coordination of
-  backend switching with the Pseudospectra API is only a dream.)
+* At present, using Pseudospectra.jl with command-line graphics calls
+  and with the QML App in the same session requires the
+  use of a `Plots` backend **other than** PyPlot for the command-line work.
+  (This is because the plotter must use a
+  non-interactive interface to prepare images for QML)
 * The App is in its own module, which is reloaded for each instance.
 * PseudospectraQML uses a separate module (PSAData) to store
   some variables.
 
 # Known issues
 * The GUI is finicky.
-  * Text fields may not be properly converted to associated variables. Using
-    the Tab key to check in the value seems most reliable.
-  * Coordinate conversion for zooming is flaky. I find that resizing the
+  * Text fields may not be properly converted to associated variables unless
+    one uses the Tab key to check in the value.
+  * Coordinate conversion for zooming is flaky. Sometimes resizing the
     whole app window, then forcing a redraw, makes it more accurate.
-  * Obscure callback problems will arise occasionally.
+  * Obscure callback problems arise occasionally, some harmless,
+	others not.
+* Some informational messages are not correctly synchronized.
 * Some warnings and errors provoked from the GUI are reported in the console.
 * Some buttons & menu items remain enabled when incompatible with state.
 * The control flow is very convoluted.
-  * Zooming and the axis-setting widgets are not coordinated (yet).
+  * Zooming and the axis-setting widgets are not always coordinated.
   * Deadlocks or crashes are possible. File an issue if you encounter them.
 
 # Caveat
 The current translator/author is a novice at GUI construction, and generally
-prefers command-line interfaces. Hence this part of the project may languish
+prefers command-line interfaces. Hence this project may languish
 unless others show interest.
 
 # Disclaimer

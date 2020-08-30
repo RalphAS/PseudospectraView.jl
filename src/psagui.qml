@@ -545,23 +545,27 @@ ApplicationWindow {
 		pickZDlg.visible = true;
 	    }
 */
-	    signal startTimer()
+	    signal startTimer(var x)
 	    onStartTimer: {
-		timer.start(10);
+		timer.start(x);
 	    }
 	    signal stopTimer()
 	    onStopTimer: {
 		timer.stop();
 	    }
 
-	    signal runTimer(var x) // int
-	    onRunTimer: {
-		if (x >= 0) {
-		    timer.interval = x;
-		    timer.start();
-		}
-		else
-		    timer.stop();
+	    signal setInterval(var x) // int
+	    onSetInterval: {
+		timer.interval = x;
+	    }
+
+	    /*
+	     * This is used in development to get to a state where
+	     * postmortem diagnosis of serious errors may be possible.
+	     */
+	    signal dieDieDie()
+	    onDieDieDie: {
+		Qt.quit();
 	    }
 	}
 
