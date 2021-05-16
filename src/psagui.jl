@@ -1,14 +1,5 @@
 module PSApp
 
-# WARNING: some comments are obsolete!
-# Even worse, some control flow is probably obsolete too.
-
-function cprint(s::String)
-    n = length(s)+1
-    fid = 2
-    ccall(:write,Clong,(Cint,Cstring,Clong),fid,s,n)
-end
-
 # needed for use of JuliaPaintedItem
 ENV["QSG_RENDER_LOOP"] = "basic"
 
@@ -28,18 +19,17 @@ using Plots
 
 using CxxWrap
 
-# Other backends are not yet really functional, so try to force this for now.
 if _pbackend[] == :pyplot
     # Python must not manage a gui
     ENV["MPLBACKEND"] = "Agg"
     pyplot()
-else
-    # Experimental!
-    # @warn "GR backend is experimental!"
+elseif _pbackend[] == :gr
     ENV["GKSwstype"] = "use_default"
     ENV["GKS_WSTYPE"] = 381
     ENV["GKS_QT_VERSION"] = 5
     gr(show=false)
+else
+    error("backend must be :pyplot or :gr")
 end
 
 (verbosity() > 1) && println("Plots loaded, backend is $(typeof(Plots.backend())).")
@@ -51,8 +41,7 @@ PSA = Pseudospectra
 PseudospectraPlots = Pseudospectra.PseudospectraPlots
 PlotsGUIState = Pseudospectra.PseudospectraPlots.PlotsGUIState
 function drawcmd end # forward decl
-const gs = PlotsGUIState(nothing,0,drawcmd)
-
+const gs = PlotsGUIState(nothing,0,drawcmd,separate_subplots=(_pbackend[] == :gr))
 
 using PseudospectraQML
 
@@ -92,7 +81,6 @@ dvi = dvi_unset
 
 const timer = QTimer()
 
-const cpaint = Channel{Int}(1)
 const mcounter = Ref(0)
 
 # flags indicating whether items changed by GUI require action
@@ -100,7 +88,8 @@ need_recomp = false
 need_redraw = false
 
 # In order to force updates of the GUI window, we use tasks
-# and a QTimer. For now we use produce/consume logic.
+# and a QTimer. For now we use produce/consume logic, and
+# do everything synchronously, in an effort to ensure GUI updates.
 compute_chnl = nothing
 const running = Ref(false)
 
@@ -188,14 +177,27 @@ mutable struct Monitor
         return me
     end
 end
+
 isfinished(c::Monitor) = c.status >= 3
+
 struct Runner
     channel::Channel
     ready::Bool
 end
+
+# This is used for debugging the task/channel stuff.
+# There should be exactly zero chance for libuv to confuse me.
+function cprint(s::String)
+    verbosity() > 2 || return
+    n = length(s)+1
+    fid = 2
+    ccall(:write,Clong,(Cint,Cstring,Clong),fid,s,n)
+end
+
 function compute_chan(channel::Channel)
     verbosity() > 1 && println("starting computation")
     c = Monitor()
+    mcounter[] = 0
     while !isfinished(c)
         run!(c)
         if isready(channel)
@@ -204,10 +206,8 @@ function compute_chan(channel::Channel)
         cprint("putting $(c.status) in cc\n")
         put!(channel, c.status)
         cprint("continuing in cc\n")
-        # if c.status == 3
-        #    QML.stop(timer)
-        # end
     end
+    (verbosity() > 1) && println("paint calls: $(mcounter[])")
     cprint("cc done\n")
     put!(channel, 4)
     cprint("cc exiting\n")
@@ -216,21 +216,13 @@ end
 
 const pvals = [0.0, 0.5, 0.99, 1.0, -1.0]
 function step(r::Runner)
-    # failed attempt to avoid deadlock by letting another tick go by
-  # if isopen(r.channel)
-    # NOTE: if we don't block on r.channel, everything waits in limbo
     if !isready(r.channel)
         cprint("blocking in step\n")
     end
     s = take!(r.channel)
     cprint("taking $s in step\n")
-    verbosity() > 1 && println("step got $s")
-#    if s == 3
-#        QML.stop(timer)
-#    end
     o_progress[] = pvals[s]
     @emit updateMainPlot()
-  # end
 end
 
 on(o_ticks) do t
@@ -238,21 +230,19 @@ on(o_ticks) do t
     if t > 0
         step(computation[])
     end
-#    if !isready(cpaint)
-#        verbosity() > 1 && println("ticker puts to cpaint")
-#        put!(cpaint, -1)
-#    end
 end
 
 function run!(c::Monitor)
     c.status = 1
     running[] = true
-    (verbosity() > 1) && println("calculating...")
+    (verbosity() > 0) && println("calculating...")
     printinfo("calculating...")
-    PSA.driver!(ps_data,guiopts,gs,myprintln=printinfo)
+    PSA.driver!(ps_data,guiopts,gs,
+                myprintln=println # should be printinfo, but we're not getting updates yet
+                )
     setedittext(ps_data.zoom_list[ps_data.zoom_pos])
     running[] = false
-    (verbosity() > 1) && println("calculation done.")
+    (verbosity() > 0) && println("calculation done.")
     printinfo("done.")
     c.status = 3
 end
@@ -405,6 +395,7 @@ on(o_arpack_which) do s
         if haskey(ps_dict,:arpack_opts)
             if ps_dict[:arpack_opts].which != Symbol(s)
                 ps_dict[:arpack_opts].which = Symbol(s)
+                ps_dict[:proj_valid] = false
                 need_recomp = true
                 @emit enableGo(Int32(1))
             end
@@ -452,7 +443,8 @@ end
 # These are called by the App code, apparently only on setup or resize
 # Display is generally forced via drawcmd().
 
-# somebody doesn't manage dimensions correctly
+# Somebody doesn't manage dimensions correctly
+# This is an attempt at a work-around.
 const pyplot_fudge = 0.9
 
 function init_backend(width::Float64, height::Float64, idx)
@@ -468,8 +460,6 @@ function init_backend(width::Float64, height::Float64, idx)
         pyplot(size=(round(Int64,pyplot_fudge*width),
                      round(Int64,height)))
     elseif isa(Plots.backend(),Plots.GRBackend)
-        @warn "Support for GR backend is incomplete; expect trouble." maxlog=1
-        # CHECKME: GR may need a vertical fudge factor
         gr(size=(round(Int64,width),round(Int64,height)))
         Plots.GR.inline()
     else
@@ -478,7 +468,7 @@ function init_backend(width::Float64, height::Float64, idx)
     return
 end
 
-# This is supposed to help with z-picking. It doesn't, yet.
+# This is supposed to help with z-picking. It does, sometimes.
 function set_paint_size(width::Float64, height::Float64, idx)
     if width < 5 || height < 5
         return
@@ -783,6 +773,9 @@ function use_eigs(x::Int32)
             @emit toggleFoV(Int32(1))
         end
     else
+        if dvi != dvi_iter
+            ps_dict[:proj_valid] = false
+        end
         dvi = dvi_iter
         if !haskey(ps_dict,:arpack_opts)
             ps_dict[:arpack_opts] = PSA.ArpackOptions{eltype(ps_data.matrix)}()
@@ -914,19 +907,16 @@ function plotpmode()
 end
 
 function mtxpwrcb(nmax)
-    # This breaks easily, so we wrap it up in cotton wool.
-
-    # FIXME: this is really ugly. Surely there is a better way?
     flag = false
-    local JE
     try
         PSA.mtxpowersplot(gs,ps_data,nmax,gradual=false)
     catch JE
+        println("Matrix power exception:")
+        println(JE)
         flag = true
     end
     if flag
         printwarning("Matrix power comp/plot failed. See console.")
-        rethrow(JE)
     else
         @emit showPlot(Int32(1), Int32(live_pane()))
     end
@@ -934,15 +924,15 @@ end
 
 function mtxexpcb(dt,nmax)
     flag = false
-    local JE
     try
         PSA.mtxexpsplot(gs,ps_data,dt,nmax, gradual=false)
     catch JE
+        println("Matrix exponential exception:")
+        println(JE)
         flag = true
     end
     if flag
         printwarning("Matrix exp comp/plot failed. See console.")
-        rethrow(JE)
     else
         @emit showPlot(Int32(1), Int32(live_pane()))
     end
@@ -970,17 +960,11 @@ function paint_main(p::CxxPtr{QPainter}, item::CxxPtr{JuliaPaintedItem})
     if running[]
         c = mcounter[] + 1
         mcounter[] = c
-#        if !isready(cpaint)
-#            verbosity() > 1 && println("painter puts to cpaint")
-#            put!(cpaint, c)
-#       end
-        # @emit stopTimer()
     end
     if (gs.mainph === nothing)
         (verbosity() > 1) && println("null paint_main called")
         return
     end
-    (verbosity() > 2) && println("paint_main called")
     if mainsize[1] > 0
         plot!(gs.mainph, size=(w,h)) # Tuple(mainsize))
         display(gs.mainph)
@@ -997,11 +981,31 @@ function paint_second(p::CxxPtr{QPainter}, item::CxxPtr{JuliaPaintedItem})
         (verbosity() > 1) && println("null paint_second called")
         return
     end
-    (verbosity() > 1) && println("paint_second called")
     if othersize[1] > 0
         plot!(gs.ph2, size=(w,h))
-        #@warn "suppressing display"
-        px = plot(gs.ph2[1],layout=(1,1))
+        # for a while, we needed this:
+        # px = plot(gs.ph2[1],layout=(1,1))
+        # px = plot(gs.ph2[1])
+        px = gs.ph2
+        display(px)
+    end
+    return
+end
+function paint_third(p::CxxPtr{QPainter}, item::CxxPtr{JuliaPaintedItem})
+    (_pbackend[] == :gr) || return
+    ENV["GKS_CONID"] = split(repr(p.cpp_object), "@")[2]
+    dev = device(p[])[]
+    r = effectiveDevicePixelRatio(window(item[])[])
+    w, h = width(dev) / r, height(dev) / r
+    if (gs.ph3 === nothing)
+        (verbosity() > 1) && println("null paint_third called")
+        return
+    end
+    if othersize[1] > 0
+        plot!(gs.ph3, size=(w,h))
+        # px = plot(gs.ph3[1],layout=(1,1))
+        # px = plot(gs.ph3[1])
+        px = gs.ph3
         display(px)
     end
     return
@@ -1022,10 +1026,9 @@ function drawcmd(gs::PlotsGUIState,ph,id)
             end
         else
             if running[]
-                if computation[] === nothing
-                    cprint("? running w/o computation\n")
-                    # @emit dieDieDie()
-                else
+                # There is often a call before anything is ready.
+                # AFAICT it is not a problem.
+                if !(computation[] === nothing)
                     if isready(computation[].channel)
                         cprint("blocking in drawcmd\n")
                     end
@@ -1044,8 +1047,15 @@ function drawcmd(gs::PlotsGUIState,ph,id)
                 display(otherdisplay, ph)
             end
         else
-            gs.ph2 = ph
-            @emit updatePlot2()
+            if id == 2
+                gs.ph2 = ph
+                @emit updatePlot2()
+            elseif id == 3
+                gs.ph3 = ph
+                @emit updatePlot3()
+            else
+                @warn "unimplemented plot destination id=$id"
+            end
         end
     end
 end
@@ -1176,25 +1186,18 @@ function refresh()
     else # iterative
         @emit toggleDirect(Int32(0))
         if !haskey(ps_dict,:arpack_opts)
-            # FIXME: warn via gui and bail
-            throw(ArgumentError("ps_data has no arpack opts"))
+            panic("ps_data needs ARPACK opts")
         end
         setarpackgui(ps_dict[:arpack_opts])
-        # If the user specified (some) ARPACK options, we might be ready to go.
-        # Nah: esp. w/o a stop button, premature start is more likely and
+        # If the user specified (some) ARPACK options, we might be ready to go,
+        # but esp. w/o a stop button, premature start is more likely and
         # more troublesome.
-        #=
-        if haskey(guiopts,:arpack_opts)
-            # FIXME: couldn't clear, so may get junk while starting up
-            @emit showPlot(Int32(0), Int32(1))
-            PSA.driver!(ps_data,guiopts,gs)
-            @emit enableGo(Int32(0))
-        else
-        =#
+
+        # FIXME: implement a "clear" command, so we don't get junk while starting up
         begin
             printinfo("Set/check ARPACK options before proceeding")
             need_recomp = true
-            # CHECKME: should we wait until options are ready?
+            # Since we provide defaults, one may proceed immediately.
             @emit enableGo(Int32(1))
         end
     end
@@ -1214,7 +1217,7 @@ if !isempty(PSAData.getdefaultmtx())
     # guiopts is empty until now
     merge!(guiopts,PSA.fillopts(gs,PSAData.opts))
     ps_data = PSA.new_matrix(PSAData.getdefaultmtx(),guiopts)
-    (verbosity() > 1) && println("Matrix has been digested.")
+    (verbosity() > 0) && println("Matrix has been digested.")
     # forget opts that should not apply to newly ingested data
     # viz. when new_matrix() is invoked from GUI.
     PSAData.clearopts(false)
@@ -1224,10 +1227,12 @@ end
 
 qml_file = joinpath(dirname(@__FILE__), "psagui.qml")
 
-load(qml_file, timer=timer, observables=propmap,
+loadqml(qml_file, timer=timer, observables=propmap,
      paint_main_wrapped = @safe_cfunction(paint_main, Cvoid,
                                           (CxxPtr{QPainter}, CxxPtr{JuliaPaintedItem})),
      paint_second_wrapped = @safe_cfunction(paint_second, Cvoid,
+                                          (CxxPtr{QPainter}, CxxPtr{JuliaPaintedItem})),
+     paint_third_wrapped = @safe_cfunction(paint_third, Cvoid,
                                           (CxxPtr{QPainter}, CxxPtr{JuliaPaintedItem}))
      )
 

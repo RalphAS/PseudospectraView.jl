@@ -39,9 +39,8 @@ please provide details of how to reproduce the latter.
 The graphical user interface is based on [QML.jl](https://github.com/barche/QML.jl).
 Install that and make sure it works first.
 
-The current version of this package requires Plots.jl. The PyPlot
-backend for Plots is supported; support for the GR backend is work
-in progress.
+The current version of this package requires Plots.jl. The GR and PyPlot
+backends for Plots are supported.
 
 Install [Pseudospectra.jl](https://github.com/RalphAS/Pseudospectra.jl); this
 must be done manually, pending registration.
@@ -90,17 +89,19 @@ Much of [the EigTool documentation](http://www.cs.ox.ac.uk/pseudospectra/eigtool
 also applies to PseudospectraQML.
 
 # Saving figures
-To save a plot for external use, the recommended procedure is as follows:
+If you use the PyPlot backend for Plots, saving from the "File" menu is possible.
+
+Otherwise, to save a plot for external use, the recommended procedure is as follows:
 1. save the current data as a `Portrait` type, using the "File" menu
 2. exit the App (Alt-F4 works for me)
 3. use fields of the saved variable to make a plot
 E.g., if you saved the `Portrait` as variable `baz`,
 ```julia
-saved_vars = psagui(A)
+saved_vars = psagui(A; backend=:gr)
 # run the app, then close the window
 
 using Plots
-gr() # or some other backend - see below
+pyplot() # you must change the backend - see below
 baz = saved_vars[:baz]
 contour(baz.x,baz.y,baz.Z)
 png("baz")

@@ -463,6 +463,12 @@ ApplicationWindow {
 		return;
 	    Julia.size_paint(jpaint2.width, jpaint2.height, 2);
 	}
+	function size_jpaint3()
+	{
+	    if(jpaint3 === null)
+		return;
+	    Julia.size_paint(jpaint3.width, jpaint3.height, 3);
+	}
 
 
 	JuliaSignals {
@@ -537,6 +543,9 @@ ApplicationWindow {
 
 	    signal updatePlot2()
 	    onUpdatePlot2: jpaint2.update()
+
+	    signal updatePlot3()
+	    onUpdatePlot3: jpaint3.update()
 
 /*
 	    signal clearPlot(int idnum)
@@ -885,15 +894,29 @@ ApplicationWindow {
 		    implicitHeight: 380
 		}
 
-		JuliaPaintedItem {
-		    id: jpaint2
+		ColumnLayout{
 		    implicitWidth: 400
 		    implicitHeight: 380
-		    Layout.fillWidth: true
-		    Layout.fillHeight: true
-		    onHeightChanged: root.size_jpaint2()
-		    onWidthChanged: root.size_jpaint2()
-		    paintFunction: paint_second_wrapped
+		    JuliaPaintedItem {
+			id: jpaint2
+			implicitWidth: 400
+			implicitHeight: 190
+			Layout.fillWidth: true
+			Layout.fillHeight: true
+			onHeightChanged: root.size_jpaint2()
+			onWidthChanged: root.size_jpaint2()
+			paintFunction: paint_second_wrapped
+		    }
+		    JuliaPaintedItem {
+			id: jpaint3
+			implicitWidth: 400
+			implicitHeight: 190
+			Layout.fillWidth: true
+			Layout.fillHeight: true
+			onHeightChanged: root.size_jpaint3()
+			onWidthChanged: root.size_jpaint3()
+			paintFunction: paint_third_wrapped
+		    }
 		}
 
 		JuliaDisplay {
