@@ -6,28 +6,26 @@ import QtQuick.Dialogs 1.2
 import org.julialang 1.1
 
 /*
- * WARNING: some comments are obsolete!
- * This is an incomplete refactor of a 3-year old code, a Julian dinosaur.
- */
-
-/*
  * Outline:
  *  connections
  *  dialog boxes
  *  menu bar
- *  main body (ColumnLayout)
+ *  main body (Column layout)
  *    functions
  *    signals
  *    header (rectangles)
  *    graphics row layout
- *    axis, contours, etc. row layout
+ *      main plot pane
+ *      column for commands, contours, etc.
+ *      secondary plot pane
+ *    axes, algorithmics, etc. (Row layout)
  *    footer (rectangles)
  *
  */
 
 ApplicationWindow {
     id: appEps
-    title: "Pseudospectrum Application"
+    title: "PseudospectraView"
     width: 960
     height: 640
     visible: true
@@ -107,6 +105,7 @@ ApplicationWindow {
 	}
     }
 
+    // dialog box for saving results
     Dialog {
 	id: saveDlg
 	visible: false
@@ -139,6 +138,36 @@ ApplicationWindow {
 	}
     }
 
+    // dialog box for saving a figure
+    Dialog {
+	id: saveFigDlg
+	visible: false
+        property string curkey
+	modality: Qt.WindowModal
+	title: "Save Figure to File"
+	standardButtons: StandardButton.Save | StandardButton.Cancel
+	onAccepted: Julia.savefigx(saveFigName.text,curkey)
+	ColumnLayout {
+	    spacing:6
+	    Text {
+		id: saveFigText
+		text: "author: please rewrite saveDlgText"
+	    }
+	    Text {
+		text: "Specify a file name for saved figure"
+	    }
+
+            TextField {
+		id: saveFigName
+		Layout.alignment: Qt.AlignCenter
+		Layout.minimumWidth: 150
+		Layout.preferredWidth: 200
+		placeholderText: qsTr("foobar")
+            }
+	}
+    }
+
+    // dialog box for picking a point for detailed analysis
     Dialog {
 	id: pickZDlg
 	visible: false
@@ -188,24 +217,19 @@ ApplicationWindow {
 		}
 		enabled: true
 	    }
-/*
-            // currently failing
+
+            // someone please explain why this doesn't work
+	    /*
 	    MenuItem {
 		text: "\&Quit"
 		shortcut: StandardKey.Quit
-		onTriggered: Qt.Quit()
+		onTriggered: {
+		    Qt.Quit();
+		}
 	    }
-*/
-/*
-            MenuItem {
-            text: "Open"
-            shortcut: "Ctrl+O"
-            onTriggered: { some_function(); }
-            enabled: false
-            }
-            MenuSeparator { }
-*/
-            /* can also have Menu for submenu */
+	    */
+
+            /* Menu used to define submenu */
             Menu {
 		title: "E\&xport..."
 		MenuItem {
@@ -231,8 +255,18 @@ ApplicationWindow {
 		    }
 		    enabled: true
 		}
+		MenuItem {
+		    text: "\&Figure"
+		    onTriggered: {
+			saveFigText.text = "Save spectral portrait figure"
+			saveFigDlg.curkey = "portrait"
+			saveFigDlg.visible = true
+		    }
+		    visible: observables.savefig_ok
+		    enabled: true
+		}
             }
-	} // end of File
+	} // end of File menu
 	Menu {
             title: "\&Numbers"
             MenuItem {
@@ -255,11 +289,13 @@ ApplicationWindow {
 		}
 		enabled: true /* not needed if true */
             }
+	    // Possible additions:
 	    // "Departure from normality"
 	    // "Numerical abscissa"
 	    // "Display points"
 	    // "Eigenvector matrix condition nr."
-	} // end of Numbers
+	} // end of Numbers menu
+
 	Menu {
 	    title: "\&Transients"
 	    MenuItem {
@@ -291,9 +327,19 @@ ApplicationWindow {
 	    // ET has additional menuitems:
 	    // "Compute a bound"
 	    // "Best estimate lower bound"
-	} // end of Transients
+	} // end of Transients menu
+
 	Menu {
             title: "E\&xtras"
+	    MenuItem {
+		id: fovCkBox
+		text: "Display \&numerical range"
+		checkable: true
+		checked: false
+		onToggled: {
+		    observables.fov = checked
+		}
+	    }
             MenuItem {
 		id: showImagAxis
 		text: "Display \&imaginary axis"
@@ -322,7 +368,8 @@ ApplicationWindow {
 		}
 		//enabled: false /* not needed if true */
             }
-	} // end of Extras
+	} // end of Extras menu
+
 	Menu {
 	    title: "\&ARPACK/eigs"
 	    MenuItem {
@@ -346,6 +393,7 @@ ApplicationWindow {
 		}
 	    }
 	} // end of ARPACK/eigs menu
+
 	// TODO:
 	/*
 	Menu {
@@ -367,7 +415,7 @@ ApplicationWindow {
 	id: root
 	spacing: 6
 	anchors.fill: parent
-	/* Layout.fillHeight: true */
+
 	property string arpMaxiter
 	property string arpWhichIdx
 	property string arpTol
@@ -701,17 +749,20 @@ ApplicationWindow {
 			onClicked: Julia.psapause()
 			}
 			*/
+			/*
+		        // this will need some more control flow logic
 			CheckBox {
-			    id: fovCkBox
-			    text: "Show numerical range"
-			    checked: false
+			    id: mouseZCkBox
+			    text: "Select z w/ mouse"
+			    checked: observables.mousez
 			    onClicked: {
-				observables.fov = checked
+				observables.mousez = checked
 			    }
 			}
+			*/
 			Button {
 			    Layout.alignment: Qt.AlignCenter
-			    text: "Select z"
+			    text: "Specify z"
 			    onClicked: {
 				pickZDlg.visible = true;
 			    }

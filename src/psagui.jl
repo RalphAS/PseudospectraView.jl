@@ -130,6 +130,7 @@ const o_firstlev = Observable("")
 const o_lastlev = Observable("")
 const o_levstep = Observable("")
 const o_fov = Observable(Cint(0))
+const o_mousez = Observable(Cint(0))
 const o_imaxis = Observable(Cint(0))
 const o_unitcircle = Observable(Cint(0))
 const o_arpack_nev = Observable("6")
@@ -137,6 +138,7 @@ const o_arpack_ncv = Observable("8")
 const o_arpack_which = Observable("LM")
 const o_ticks = Observable(Cint(0)) # Number of times the timer has ticked
 const o_surf_ok = Observable(_pbackend[] == :pyplot ? Cint(1) : Cint(0))
+const o_savefig_ok = Observable(_pbackend[] == :pyplot ? Cint(1) : Cint(0))
 
 propmap = JuliaPropertyMap(
     "computationkey" => computation_key,
@@ -152,13 +154,27 @@ propmap = JuliaPropertyMap(
     "lastlev" => o_lastlev,
     "levstep" => o_levstep,
     "fov" => o_fov,
+    "mousez" => o_mousez,
     "imag_axis" => o_imaxis,
     "unit_circle" => o_unitcircle,
     "arpack_nev" => o_arpack_nev,
     "arpack_ncv" => o_arpack_ncv,
     "arpack_which" => o_arpack_which,
     "surface_ok" => o_surf_ok,
+    "savefig_ok" => o_savefig_ok,
 )
+
+"""
+attempt to shut down the Qt app cleanly
+"""
+function panic(msg=nothing)
+    if msg === nothing
+        @warn "Unspecified fatal error"
+    else
+        @warn "Fatal error: $msg"
+    end
+    @emit dieDieDie()
+end
 
 mutable struct Monitor
     status::Int # 0:initialized 1:running 2:interrupted 3:done 4:error
@@ -691,8 +707,21 @@ function loadmtx(varname::AbstractString,myexpr::AbstractString)
     guiopts = PSA.fillopts(gs,PSAData.getopts())
     refresh()
     firstcall = false
-    (verbosity() > 1) && println("matrix loaded")
+    (verbosity() > 0) && println("matrix loaded")
     nothing
+end
+
+function savefigx(filename::AbstractString, mykey)
+    if mykey == "portrait"
+        try
+            Plots.savefig(gs.mainph, filename)
+        catch JE
+            println("savefig failed; exception:")
+            println(JE)
+        end
+    else
+        @warn "unrecognized key"
+    end
 end
 
 function savedata(varname::AbstractString,mykey)
@@ -820,11 +849,11 @@ end
 
 qmlfunction("loadmtx", loadmtx)
 qmlfunction("savedata", savedata)
+qmlfunction("savefigx", savefigx)
 qmlfunction("go", go)
 qmlfunction("use_eigs", use_eigs)
 qmlfunction("setoptbydlg", setoptbydlg)
 qmlfunction("setselectedz", setselectedz)
-# qmlfunction("monitor", monitor)
 qmlfunction("zmoused", zmoused)
 
 #=
