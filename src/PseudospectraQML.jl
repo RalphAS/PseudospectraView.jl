@@ -2,6 +2,8 @@ module PseudospectraQML
 
 using Plots
 using Pseudospectra
+using QML
+using Qt5QuickControls_jll
 
 export psagui
 
@@ -9,6 +11,7 @@ export psagui
 const pvsrcdir = realpath(@__DIR__)
 
 # this is for tracking GUI-related activity, distinct from PSA option.
+# 0: quiet, 1: reassure us that something is going on, 2: help the developer
 const _verbosity = Ref(0)
 
 # backend for Plots
@@ -30,7 +33,8 @@ end
     psagui(A[,opts])
 
 Start the QML GUI for Pseudospectra, optionally loading matrix `A` first.
-`opts` is a `Dict{Symbol,Any}` of Pseudospectra options.
+`opts` is a `Dict{Symbol,Any}` of Pseudospectra options (many of which may
+be reset by GUI objects).
 Returns a `Dict` with variables saved by the GUI, or `nothing`.
 """
 function psagui(A::AbstractMatrix,

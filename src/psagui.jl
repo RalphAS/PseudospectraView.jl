@@ -4,6 +4,11 @@ module PSApp
 ENV["QSG_RENDER_LOOP"] = "basic"
 
 using QML
+if ! (:loadqml in names(QML))
+    const loadqml = QML.load
+    @warn "You seem to be using an old version of QML; problems are likely."
+end
+
 using Observables
 
 using ..PseudospectraQML: _verbosity, _pbackend
@@ -1174,7 +1179,8 @@ function refresh()
         else
             # should be ready for this
             @emit toggleDirect(Int32(1))
-            # FIXME: wrap this in QTimer-monitored task
+            # WONTFIXME: this almost certainly won't display unless
+            # we wrap it in a QTimer-monitored task. I don't care.
             if isempty(ax) && !isempty(get(ps_dict,:ews,[]))
                 PSA.origplot!(ps_data,guiopts,gs)
             else
