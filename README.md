@@ -1,4 +1,4 @@
-# PseudospectraQML.jl
+# PseudospectraView.jl
 
 ![Lifecycle](https://img.shields.io/badge/lifecycle-experimental-orange.svg)<!--
 ![Lifecycle](https://img.shields.io/badge/lifecycle-maturing-blue.svg)
@@ -7,17 +7,17 @@
 ![Lifecycle](https://img.shields.io/badge/lifecycle-archived-red.svg)
 ![Lifecycle](https://img.shields.io/badge/lifecycle-dormant-blue.svg) -->
 <!--
-[![GitHub CI Build Status](https://github.com/RalphAS/PseudospectraQML.jl/workflows/CI/badge.svg)](https://github.com/RalphAS/PseudospectraQML.jl/actions)
-[![codecov.io](http://codecov.io/github/RalphAS/PseudospectraQML.jl/coverage.svg?branch=master)](http://codecov.io/github/RalphAS/PseudospectraQML.jl?branch=master)
+[![GitHub CI Build Status](https://github.com/RalphAS/PseudospectraView.jl/workflows/CI/badge.svg)](https://github.com/RalphAS/PseudospectraView.jl/actions)
+[![codecov.io](http://codecov.io/github/RalphAS/PseudospectraView.jl/coverage.svg?branch=master)](http://codecov.io/github/RalphAS/PseudospectraView.jl?branch=master)
 -->
 <!--
-[![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://RalphAS.github.io/PseudospectraQML.jl/stable)
-[![Documentation](https://img.shields.io/badge/docs-master-blue.svg)](https://RalphAS.github.io/PseudospectraQML.jl/dev)
+[![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://RalphAS.github.io/PseudospectraView.jl/stable)
+[![Documentation](https://img.shields.io/badge/docs-master-blue.svg)](https://RalphAS.github.io/PseudospectraView.jl/dev)
 -->
 
 # Introduction
 
-PseudospectraQML implements a Julia/Qt GUI for analyzing nonsymmetric matrices by
+PseudospectraView implements a Julia/Qt GUI for analyzing nonsymmetric matrices by
 displaying eigenvalues and pseudospectra, along with related properties.
 It is largely based on the famous
 [EigTool](http://www.cs.ox.ac.uk/pseudospectra/eigtool/) from Oxford.
@@ -38,14 +38,16 @@ backends for Plots are supported.
 Install [Pseudospectra.jl](https://github.com/RalphAS/Pseudospectra.jl); this
 package is in the General registry.
 
-Finally, add this repo ("https://github.com/RalphAS/PseudospectraQML.jl")
+Finally, add this repo ("https://github.com/RalphAS/PseudospectraView.jl")
 with the package manager.
 
 # Basics
 Invoke the App with
 
 ```julia
-using PseudospectraQML
+using PseudospectraView
+using QML # important - see below
+
 A = your_matrix_generating_function()
 saved_vars = psagui(A)
 ```
@@ -78,7 +80,7 @@ the appropriate mode button.
 
 Most GUI behavior mimics EigTool.
 Much of [the EigTool documentation](http://www.cs.ox.ac.uk/pseudospectra/eigtool/documentation/index.html)
-also applies to PseudospectraQML.
+also applies to PseudospectraView.
 
 # Saving figures
 If you use the PyPlot backend for Plots, saving from the "File" menu is possible.
@@ -106,7 +108,7 @@ png("baz")
 
 # Other notable peculiarities
 * The App is in its own module, which is reloaded for each instance.
-* PseudospectraQML uses yet another module (PSAData) to store
+* PseudospectraView uses yet another module (PSAData) to store
   some variables.
 
 # Warnings
@@ -121,7 +123,7 @@ results before running the app.  It is quite complicated and has some
 tricky dependencies, so it takes a while to load.
 
 # Other known issues
-
+* It is apparently necessary to load the QML package into the Main module.
 * The GUI is finicky.
   * Text fields may not be properly converted to associated variables unless
     one uses the Tab key to check in the value.

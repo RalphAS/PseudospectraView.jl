@@ -1,6 +1,6 @@
-Julia implementation of PseudospectraQML.jl
+Julia implementation of PseudospectraView.jl
 
- Copyright (c) 2017,2020: Ralph Smith
+ Copyright (c) 2017,2020,2021: Ralph Smith
 
 Portions derived from EigTool:
 

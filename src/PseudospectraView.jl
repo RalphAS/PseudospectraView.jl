@@ -1,4 +1,4 @@
-module PseudospectraQML
+module PseudospectraView
 
 using Plots
 using Pseudospectra

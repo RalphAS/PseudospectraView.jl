@@ -44,7 +44,7 @@ end
 """
     setdefaultmatrix(Anew::AbstractMatrix)
 
-Cache a matrix to be analyzed by PseudospectraQML.psagui().
+Cache a matrix to be analyzed by PseudospectraView.psagui().
 """
 function setdefaultmatrix(Anew::AbstractMatrix)
     global Adefault

@@ -11,7 +11,7 @@ end
 
 using Observables
 
-using ..PseudospectraQML: _verbosity, _pbackend
+using ..PseudospectraView: _verbosity, _pbackend
 verbosity() = _verbosity[]
 
 # the App will store return values here:
@@ -48,9 +48,9 @@ PlotsGUIState = Pseudospectra.PseudospectraPlots.PlotsGUIState
 function drawcmd end # forward decl
 const gs = PlotsGUIState(nothing,0,drawcmd,separate_subplots=(_pbackend[] == :gr))
 
-using PseudospectraQML
+using PseudospectraView
 
-PSAData = PseudospectraQML.PSAData
+PSAData = PseudospectraView.PSAData
 
 using Formatting
 
@@ -110,7 +110,7 @@ zselected = NaN+0.0im
 # Global state
 # Observables for data exchange between GUI and Julia
 
-const o_banner_msg = Observable("Welcome to PseudospectraQML")
+const o_banner_msg = Observable("Welcome to PseudospectraView")
 const o_info_msg = Observable("")
 const computation = Observable{Any}(nothing)
 const computation_key = Observable(Cint(0))
@@ -688,7 +688,7 @@ function loadmtx(varname::AbstractString,myexpr::AbstractString)
 
     try
         Core.eval(PSAData, Meta.parse("$(varname) = $(myexpr)"))
-        Core.eval(PseudospectraQML.PSApp,
+        Core.eval(PseudospectraView.PSApp,
              Meta.parse("ps_data = Pseudospectra.new_matrix(PSAData.$(varname),guiopts)"))
         (verbosity() > 1) && println("Matrix has been digested.")
     catch JE
