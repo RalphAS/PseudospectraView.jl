@@ -1139,4 +1139,11 @@ ApplicationWindow {
 	}
 
     } /* main column */
+
+    Timer {
+	interval: 60000; running: observables.timed; repeat: false;
+	onTriggered: {
+	    Qt.quit()
+	}
+    }
 } /* app */

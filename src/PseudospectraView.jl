@@ -49,4 +49,7 @@ function psagui(A::AbstractMatrix,
     return (length(keys(results)) == 0) ? nothing : results
 end
 
+# this is for automated testing
+const _doomed = Ref(false)
+
 end # module

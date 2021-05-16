@@ -12,6 +12,7 @@ end
 using Observables
 
 using ..PseudospectraView: _verbosity, _pbackend
+using ..PseudospectraView: _doomed
 verbosity() = _verbosity[]
 
 # the App will store return values here:
@@ -133,6 +134,7 @@ const o_arpack_which = Observable("LM")
 const o_ticks = Observable(Cint(0)) # Number of times the timer has ticked
 const o_surf_ok = Observable(_pbackend[] == :pyplot ? Cint(1) : Cint(0))
 const o_savefig_ok = Observable(_pbackend[] == :pyplot ? Cint(1) : Cint(0))
+const o_timed = Observable(Cint(_doomed[] ? 1 : 0))
 
 propmap = JuliaPropertyMap(
     "computationkey" => computation_key,
@@ -156,6 +158,7 @@ propmap = JuliaPropertyMap(
     "arpack_which" => o_arpack_which,
     "surface_ok" => o_surf_ok,
     "savefig_ok" => o_savefig_ok,
+    "timed" => o_timed,
 )
 
 """
