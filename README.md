@@ -6,8 +6,10 @@
 ![Lifecycle](https://img.shields.io/badge/lifecycle-retired-orange.svg)
 ![Lifecycle](https://img.shields.io/badge/lifecycle-archived-red.svg)
 ![Lifecycle](https://img.shields.io/badge/lifecycle-dormant-blue.svg) -->
-[![Build Status](https://travis-ci.org/RalphAS/PseudospectraQML.jl.svg?branch=master)](https://travis-ci.org/RalphAS/PseudospectraQML.jl)
+<!--
+[![GitHub CI Build Status](https://github.com/RalphAS/PseudospectraQML.jl/workflows/CI/badge.svg)](https://github.com/RalphAS/PseudospectraQML.jl/actions)
 [![codecov.io](http://codecov.io/github/RalphAS/PseudospectraQML.jl/coverage.svg?branch=master)](http://codecov.io/github/RalphAS/PseudospectraQML.jl?branch=master)
+-->
 <!--
 [![Documentation](https://img.shields.io/badge/docs-stable-blue.svg)](https://RalphAS.github.io/PseudospectraQML.jl/stable)
 [![Documentation](https://img.shields.io/badge/docs-master-blue.svg)](https://RalphAS.github.io/PseudospectraQML.jl/dev)
@@ -15,7 +17,7 @@
 
 # Introduction
 
-PseudospectraQML is a Julia/Qt GUI for analyzing nonsymmetric matrices by
+PseudospectraQML implements a Julia/Qt GUI for analyzing nonsymmetric matrices by
 displaying eigenvalues and pseudospectra, along with related properties.
 It is largely based on the famous
 [EigTool](http://www.cs.ox.ac.uk/pseudospectra/eigtool/) from Oxford.
@@ -23,16 +25,7 @@ It is largely based on the famous
 It uses core computational routines from a separate package,
 [Pseudospectra.jl](https://github.com/RalphAS/Pseudospectra.jl).
 
-
-# Warning
-
-This package is experimental and may misbehave (i.e., some remaining
-bugs may deadlock or crash a Julia session), so save any valuable
-results before running the app.  It is quite complicated and has some
-tricky dependencies, so it takes a while to load. (Also, see "Known issues"
-below.) That said, most of the basic functionality works.
-Interested users are encouraged to try it out and report problems:
-please provide details of how to reproduce the latter.
+**Please check the [Warnings](README.md#warnings) section below to avoid nasty surprises.**
 
 # Installation and direct dependencies
 
@@ -43,7 +36,7 @@ The current version of this package requires Plots.jl. The GR and PyPlot
 backends for Plots are supported.
 
 Install [Pseudospectra.jl](https://github.com/RalphAS/Pseudospectra.jl); this
-must be done manually, pending registration.
+package is in the General registry.
 
 Finally, add this repo ("https://github.com/RalphAS/PseudospectraQML.jl")
 with the package manager.
@@ -52,7 +45,6 @@ with the package manager.
 Invoke the App with
 
 ```julia
-using QML
 using PseudospectraQML
 A = your_matrix_generating_function()
 saved_vars = psagui(A)
@@ -113,36 +105,47 @@ png("baz")
 * The "pause/resume/stop" logic is not implemented.
 
 # Other notable peculiarities
-* At present, using Pseudospectra.jl with command-line graphics calls
-  and with the QML App in the same session requires the
-  use of a `Plots` backend **other than** PyPlot for the command-line work.
-  (This is because the plotter must use a
-  non-interactive interface to prepare images for QML)
 * The App is in its own module, which is reloaded for each instance.
-* PseudospectraQML uses a separate module (PSAData) to store
+* PseudospectraQML uses yet another module (PSAData) to store
   some variables.
 
-# Known issues
+# Warnings
+
+The graphics backends used by the GUI do not reliably allow for hot-swapping of
+online destinations; if you want to generate plots with other interfaces in the same
+Julia session, you should use a different backend to do so.
+
+This package is experimental and may misbehave (i.e., some remaining
+bugs may deadlock or crash a Julia session), so save any valuable
+results before running the app.  It is quite complicated and has some
+tricky dependencies, so it takes a while to load.
+
+# Other known issues
+
 * The GUI is finicky.
   * Text fields may not be properly converted to associated variables unless
     one uses the Tab key to check in the value.
   * Coordinate conversion for zooming is flaky. Sometimes resizing the
     whole app window, then forcing a redraw, makes it more accurate.
-  * Obscure callback problems arise occasionally, some harmless,
+  * Obscure callback (ok, "signalling") problems arise occasionally; some are harmless,
 	others not.
-* Some informational messages are not correctly synchronized.
-* Some warnings and errors provoked from the GUI are reported in the console.
-* Some buttons & menu items remain enabled when incompatible with state.
-* The control flow is very convoluted.
-  * Zooming and the axis-setting widgets are not always coordinated.
-  * Deadlocks or crashes are possible. File an issue if you encounter them.
+* When secondary plots are generated under the GR backend, the primary (portrait)
+  plot may be disrupted. Tinkering with mesh, contour, or axis limits settings
+  and clicking "Update" usually fixes this.
+* Sometimes the PyPlot graphics don't fit in their assigned canvas.
+* GR often fails to display legends, titles, etc.
+* PyPlot doesn't produce animated plots that I could show in the App.
+* GR doesn't produce surface plots that I could show in the App.
 
-# Caveat
-The current translator/author is a novice at GUI construction, and generally
-prefers command-line interfaces. Hence this project may languish
-unless others show interest.
+## Just to be fair, a few for which I am responsible:
+* Informational messages are not correctly synchronized.
+* Some warnings and errors provoked from the GUI are only reported in the console.
+* Some buttons & menu items may remain enabled when incompatible with the state.
+* Some exceptions are not caught, and will return to the REPL, leaving the GUI in an
+  unstable state.
 
-# Disclaimer
+
+# Disclaimers
 This software is provided by the copyright holders and contributors "as is" and
 any express or implied warranties, including, but not limited to, the implied
 warranties of merchantability and fitness for a particular purpose are
