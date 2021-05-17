@@ -4,7 +4,19 @@ using Plots
 using Pseudospectra
 using QML
 if VERSION >= v"1.6"
-    using Qt5QuickControls_jll
+    using Pkg: dependencies
+    function _getver(pname)
+        pd = dependencies()
+        for p in values(pd)
+            if p.name == pname
+                return p.version
+            end
+        end
+        return nothing
+    end
+    if _getver("QML") >= v"0.7"
+        using Qt5QuickControls_jll
+    end
 end
 
 export psagui
