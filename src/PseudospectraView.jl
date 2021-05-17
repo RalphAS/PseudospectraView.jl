@@ -3,7 +3,9 @@ module PseudospectraView
 using Plots
 using Pseudospectra
 using QML
-using Qt5QuickControls_jll
+if VERSION >= v"1.6"
+    using Qt5QuickControls_jll
+end
 
 export psagui
 
