@@ -18,6 +18,11 @@ Qt5QuickControls_jll = "e4aecf45-a397-53cc-864f-87db395e0248"
 [compat]
 julia = "1.3"
 QML = "0.6.1, 0.7"
+Observables = "0.3, 0.4"
+CxxWrap = "0.11"
+Formatting = "0.4"
+Pseudospectra = "0.2"
+Plots = "1.6"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
